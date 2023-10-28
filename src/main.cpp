@@ -59,9 +59,13 @@ public:
     return true;
   }
 
-  void render(int x, int y) {
+  void render(int x, int y, SDL_FRect *clip = NULL) {
     SDL_FRect viewport{float(x), float(y), float(width_), float(height_)};
-    SDL_RenderTexture(renderer, texture_, NULL, &viewport);
+    if (clip != NULL) {
+      viewport.w = clip->w;
+      viewport.h = clip->h;
+    }
+    SDL_RenderTexture(renderer, texture_, clip, &viewport);
   }
 
 private:
@@ -71,14 +75,10 @@ private:
 };
 
 SDL_Surface *screenSurface = NULL;
-SDL_Surface *keyPressSurfaces[static_cast<size_t>(
-    KeyPressSurfaces::KEY_PRESS_SURFACE_TOTAL)];
 SDL_Surface *currentSurface = NULL;
 
-SDL_Texture *currentTexture = NULL;
-
-LTexture fooTexture;
-LTexture backgroundTexture;
+SDL_FRect spriteClips[4];
+LTexture spriteSheetTexture;
 
 constexpr int SCREEN_WIDTH = 640;
 constexpr int SCREEN_HEIGHT = 480;
@@ -120,77 +120,37 @@ bool init() {
 
 void close() {
   SDL_DestroySurface(screenSurface);
-  SDL_DestroyTexture(currentTexture);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();
 }
 
-SDL_Surface *loadSurface(std::string path) {
-  auto loadedSurface = IMG_Load(path.c_str());
-  if (!loadedSurface) {
-    SDL_Log("%s %s", path.c_str(), IMG_GetError());
-    return nullptr;
-  }
-
-  auto optimizedSurface =
-      SDL_ConvertSurface(loadedSurface, loadedSurface->format);
-  SDL_DestroySurface(loadedSurface);
-
-  return optimizedSurface;
-}
-
-SDL_Texture *loadTexture(std::string path) {
-  auto texture = IMG_LoadTexture(renderer, path.c_str());
-  if (!texture) {
-    SDL_Log("%s", IMG_GetError());
-  }
-  return texture;
-}
-
 bool loadMedia() {
   bool success = true;
 
-  fooTexture.loadFromFile("assets/foo.png");
-  backgroundTexture.loadFromFile("assets/background.png");
-  currentTexture = loadTexture("assets/texture.png");
-  if (!currentTexture) {
+  if (!spriteSheetTexture.loadFromFile(
+          "assets/11_clip_rendering_and_sprite_sheets/dots.png")) {
     success = false;
-  }
+  } else {
+    spriteClips[0].x = 0;
+    spriteClips[0].y = 0;
+    spriteClips[0].w = 100;
+    spriteClips[0].h = 100;
 
-  // default
-  keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_DEFAULT)] =
-      loadSurface("assets/press.bmp");
-  if (!keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_DEFAULT)]) {
-    success = false;
-  }
+    spriteClips[1].x = 100;
+    spriteClips[1].y = 0;
+    spriteClips[1].w = 100;
+    spriteClips[1].h = 100;
 
-  // up
-  keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_UP)] =
-      loadSurface("assets/up.bmp");
-  if (!keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_UP)]) {
-    success = false;
-  }
+    spriteClips[2].x = 0;
+    spriteClips[2].y = 100;
+    spriteClips[2].w = 100;
+    spriteClips[2].h = 100;
 
-  // down
-  keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_DOWN)] =
-      loadSurface("assets/down.bmp");
-  if (!keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_DOWN)]) {
-    success = false;
-  }
-
-  // left
-  keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_LEFT)] =
-      loadSurface("assets/left.bmp");
-  if (!keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_LEFT)]) {
-    success = false;
-  }
-
-  // right
-  keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_RIGHT)] =
-      loadSurface("assets/right.bmp");
-  if (!keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_RIGHT)]) {
-    success = false;
+    spriteClips[3].x = 100;
+    spriteClips[3].y = 100;
+    spriteClips[3].w = 100;
+    spriteClips[3].h = 100;
   }
 
   return success;
@@ -199,8 +159,6 @@ bool loadMedia() {
 void gameLoop() {
 
   SDL_Event event;
-  currentSurface =
-      keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_DEFAULT)];
 
   bool quit = false;
   while (!quit) {
@@ -212,10 +170,14 @@ void gameLoop() {
 
       SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
       SDL_RenderClear(renderer);
-
-      backgroundTexture.render(0, 0);
-      fooTexture.render(240, 190);
-
+      spriteSheetTexture.render(0, 0, &spriteClips[0]);
+      spriteSheetTexture.render(SCREEN_WIDTH - spriteClips[1].w, 0,
+                                &spriteClips[1]);
+      spriteSheetTexture.render(0, SCREEN_HEIGHT - spriteClips[2].h,
+                                &spriteClips[2]);
+      spriteSheetTexture.render(SCREEN_WIDTH - spriteClips[3].w,
+                                SCREEN_HEIGHT - spriteClips[3].h,
+                                &spriteClips[3]);
       SDL_RenderPresent(renderer);
     }
 
