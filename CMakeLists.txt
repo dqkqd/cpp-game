@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.5)
 project(mygame)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS on)
+
 add_subdirectory(vendored/SDL EXCLUDE_FROM_ALL)
 add_subdirectory(vendored/SDL_image EXCLUDE_FROM_ALL)
 
