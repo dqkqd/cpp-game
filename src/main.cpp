@@ -45,7 +45,7 @@ void close() {
 
 bool loadMedia() {
   bool success = true;
-  image = SDL_LoadBMP("../src/hello_world.bmp");
+  image = SDL_LoadBMP("assets/hello_world.bmp");
   if (!image) {
     SDL_Log("%s", SDL_GetError());
     success = false;
@@ -53,20 +53,20 @@ bool loadMedia() {
   return success;
 }
 
-void run() {
+void gameLoop() {
   SDL_BlitSurface(image, nullptr, screenSurface, nullptr);
   SDL_UpdateWindowSurface(window);
 
-  while (1) {
-    int finished = 0;
+  bool quit = false;
+  while (!quit) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
       if (event.type == SDL_EVENT_QUIT) {
-        finished = 1;
+        quit = true;
         break;
       }
     }
-    if (finished) {
+    if (quit) {
       break;
     }
   }
@@ -75,7 +75,7 @@ void run() {
 int main(int argc, char *argv[]) {
   init();
   if (loadMedia()) {
-    run();
+    gameLoop();
   }
   close();
   return 0;
