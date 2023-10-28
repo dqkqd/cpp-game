@@ -1,14 +1,7 @@
-#include "SDL_error.h"
-#include "SDL_log.h"
-#include "SDL_oldnames.h"
-#include "SDL_pixels.h"
-#include "SDL_rect.h"
-#include "SDL_render.h"
-#include "SDL_stdinc.h"
-#include "SDL_surface.h"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 enum class KeyPressSurfaces {
@@ -37,25 +30,20 @@ public:
     }
   }
 
+  void setColor(Uint8 r, Uint8 g, Uint8 b) {
+    if (SDL_SetTextureColorMod(texture_, r, g, b) < 0) {
+      SDL_Log("%s", SDL_GetError());
+    }
+  }
+
   bool loadFromFile(std::string path) {
     free();
-    auto surface = IMG_Load(path.c_str());
-    if (surface == NULL) {
-      SDL_Log("%s", IMG_GetError());
-      return false;
-    }
-    SDL_SetSurfaceColorKey(surface, SDL_TRUE,
-                           SDL_MapRGB(surface->format, 0, 255, 255));
-    texture_ = SDL_CreateTextureFromSurface(renderer, surface);
+    texture_ = IMG_LoadTexture(renderer, path.c_str());
     if (texture_ == NULL) {
       SDL_Log("%s", IMG_GetError());
-      return false;
+    } else if (SDL_QueryTexture(texture_, NULL, NULL, &width_, &height_) < 0) {
+      SDL_Log("%s", SDL_GetError());
     }
-    width_ = surface->w;
-    height_ = surface->h;
-
-    SDL_DestroySurface(surface);
-
     return true;
   }
 
@@ -77,8 +65,7 @@ private:
 SDL_Surface *screenSurface = NULL;
 SDL_Surface *currentSurface = NULL;
 
-SDL_FRect spriteClips[4];
-LTexture spriteSheetTexture;
+LTexture modulatedTexture;
 
 constexpr int SCREEN_WIDTH = 640;
 constexpr int SCREEN_HEIGHT = 480;
@@ -128,29 +115,8 @@ void close() {
 bool loadMedia() {
   bool success = true;
 
-  if (!spriteSheetTexture.loadFromFile(
-          "assets/11_clip_rendering_and_sprite_sheets/dots.png")) {
+  if (!modulatedTexture.loadFromFile("assets/12_color_modulation/colors.png")) {
     success = false;
-  } else {
-    spriteClips[0].x = 0;
-    spriteClips[0].y = 0;
-    spriteClips[0].w = 100;
-    spriteClips[0].h = 100;
-
-    spriteClips[1].x = 100;
-    spriteClips[1].y = 0;
-    spriteClips[1].w = 100;
-    spriteClips[1].h = 100;
-
-    spriteClips[2].x = 0;
-    spriteClips[2].y = 100;
-    spriteClips[2].w = 100;
-    spriteClips[2].h = 100;
-
-    spriteClips[3].x = 100;
-    spriteClips[3].y = 100;
-    spriteClips[3].w = 100;
-    spriteClips[3].h = 100;
   }
 
   return success;
@@ -161,23 +127,42 @@ void gameLoop() {
   SDL_Event event;
 
   bool quit = false;
+  uint8_t r = 255;
+  uint8_t g = 255;
+  uint8_t b = 255;
+
   while (!quit) {
     while (SDL_PollEvent(&event)) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
+      } else if (event.type == SDL_EVENT_KEY_DOWN) {
+        switch (event.key.keysym.sym) {
+        case SDLK_q:
+          r += 32;
+          break;
+        case SDLK_w:
+          g += 32;
+          break;
+        case SDLK_e:
+          b += 32;
+          break;
+        case SDLK_a:
+          r -= 32;
+          break;
+        case SDLK_s:
+          g -= 32;
+          break;
+        case SDLK_d:
+          b -= 32;
+          break;
+        }
       }
 
       SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
       SDL_RenderClear(renderer);
-      spriteSheetTexture.render(0, 0, &spriteClips[0]);
-      spriteSheetTexture.render(SCREEN_WIDTH - spriteClips[1].w, 0,
-                                &spriteClips[1]);
-      spriteSheetTexture.render(0, SCREEN_HEIGHT - spriteClips[2].h,
-                                &spriteClips[2]);
-      spriteSheetTexture.render(SCREEN_WIDTH - spriteClips[3].w,
-                                SCREEN_HEIGHT - spriteClips[3].h,
-                                &spriteClips[3]);
+      modulatedTexture.setColor(r, g, b);
+      modulatedTexture.render(0, 0);
       SDL_RenderPresent(renderer);
     }
 
