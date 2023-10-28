@@ -60,8 +60,8 @@ public:
   }
 
   void render(int x, int y) {
-    SDL_Rect viewport{x, y, width_, height_};
-    SDL_RenderTexture(renderer, texture_, NULL, NULL);
+    SDL_FRect viewport{float(x), float(y), float(width_), float(height_)};
+    SDL_RenderTexture(renderer, texture_, NULL, &viewport);
   }
 
 private:
