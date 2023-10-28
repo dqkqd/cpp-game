@@ -1,5 +1,10 @@
+#include "SDL_error.h"
+#include "SDL_log.h"
+#include "SDL_render.h"
+#include "SDL_surface.h"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
+#include <cstddef>
 #include <string>
 
 enum class KeyPressSurfaces {
@@ -12,11 +17,14 @@ enum class KeyPressSurfaces {
 };
 
 SDL_Window *window = NULL;
+SDL_Renderer *renderer = NULL;
+
 SDL_Surface *screenSurface = NULL;
-SDL_Surface *image = NULL;
 SDL_Surface *keyPressSurfaces[static_cast<size_t>(
     KeyPressSurfaces::KEY_PRESS_SURFACE_TOTAL)];
 SDL_Surface *currentSurface = NULL;
+
+SDL_Texture *currentTexture = NULL;
 
 bool init() {
 
@@ -32,12 +40,19 @@ bool init() {
       SDL_Log("%s", SDL_GetError());
       success = false;
     } else {
-      int imgFlags = IMG_INIT_PNG;
-      if (!(IMG_Init(imgFlags) & imgFlags)) {
-        SDL_Log("%s ", IMG_GetError());
+
+      renderer = SDL_CreateRenderer(window, NULL, SDL_RENDERER_ACCELERATED);
+      if (!renderer) {
+        SDL_Log("%s", SDL_GetError());
         success = false;
       } else {
-        screenSurface = SDL_GetWindowSurface(window);
+        int imgFlags = IMG_INIT_PNG;
+        if (!(IMG_Init(imgFlags) & imgFlags)) {
+          SDL_Log("%s ", IMG_GetError());
+          success = false;
+        } else {
+          screenSurface = SDL_GetWindowSurface(window);
+        }
       }
     }
   }
@@ -47,7 +62,8 @@ bool init() {
 
 void close() {
   SDL_DestroySurface(screenSurface);
-  SDL_DestroySurface(image);
+  SDL_DestroyTexture(currentTexture);
+  SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();
 }
@@ -66,8 +82,21 @@ SDL_Surface *loadSurface(std::string path) {
   return optimizedSurface;
 }
 
+SDL_Texture *loadTexture(std::string path) {
+  auto texture = IMG_LoadTexture(renderer, path.c_str());
+  if (!texture) {
+    SDL_Log("%s", IMG_GetError());
+  }
+  return texture;
+}
+
 bool loadMedia() {
   bool success = true;
+
+  currentTexture = loadTexture("assets/texture.png");
+  if (!currentTexture) {
+    success = false;
+  }
 
   // default
   keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_DEFAULT)] =
@@ -146,6 +175,10 @@ void gameLoop() {
           break;
         }
       }
+
+      SDL_RenderClear(renderer);
+      SDL_RenderTexture(renderer, currentTexture, nullptr, nullptr);
+      SDL_RenderPresent(renderer);
 
       SDL_BlitSurface(currentSurface, nullptr, screenSurface, nullptr);
       SDL_UpdateWindowSurface(window);
