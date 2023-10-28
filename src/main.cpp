@@ -1,8 +1,10 @@
 #include "SDL_error.h"
 #include "SDL_log.h"
 #include "SDL_oldnames.h"
+#include "SDL_pixels.h"
 #include "SDL_rect.h"
 #include "SDL_render.h"
+#include "SDL_stdinc.h"
 #include "SDL_surface.h"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
@@ -21,12 +23,62 @@ enum class KeyPressSurfaces {
 SDL_Window *window = NULL;
 SDL_Renderer *renderer = NULL;
 
+class LTexture {
+public:
+  LTexture() {}
+  ~LTexture() { free(); }
+
+  void free() {
+    if (texture_ != NULL) {
+      SDL_DestroyTexture(texture_);
+      texture_ = NULL;
+      width_ = 0;
+      height_ = 0;
+    }
+  }
+
+  bool loadFromFile(std::string path) {
+    free();
+    auto surface = IMG_Load(path.c_str());
+    if (surface == NULL) {
+      SDL_Log("%s", IMG_GetError());
+      return false;
+    }
+    SDL_SetSurfaceColorKey(surface, SDL_TRUE,
+                           SDL_MapRGB(surface->format, 0, 255, 255));
+    texture_ = SDL_CreateTextureFromSurface(renderer, surface);
+    if (texture_ == NULL) {
+      SDL_Log("%s", IMG_GetError());
+      return false;
+    }
+    width_ = surface->w;
+    height_ = surface->h;
+
+    SDL_DestroySurface(surface);
+
+    return true;
+  }
+
+  void render(int x, int y) {
+    SDL_Rect viewport{x, y, width_, height_};
+    SDL_RenderTexture(renderer, texture_, NULL, NULL);
+  }
+
+private:
+  SDL_Texture *texture_;
+  int width_;
+  int height_;
+};
+
 SDL_Surface *screenSurface = NULL;
 SDL_Surface *keyPressSurfaces[static_cast<size_t>(
     KeyPressSurfaces::KEY_PRESS_SURFACE_TOTAL)];
 SDL_Surface *currentSurface = NULL;
 
 SDL_Texture *currentTexture = NULL;
+
+LTexture fooTexture;
+LTexture backgroundTexture;
 
 constexpr int SCREEN_WIDTH = 640;
 constexpr int SCREEN_HEIGHT = 480;
@@ -99,6 +151,8 @@ SDL_Texture *loadTexture(std::string path) {
 bool loadMedia() {
   bool success = true;
 
+  fooTexture.loadFromFile("assets/foo.png");
+  backgroundTexture.loadFromFile("assets/background.png");
   currentTexture = loadTexture("assets/texture.png");
   if (!currentTexture) {
     success = false;
@@ -156,21 +210,11 @@ void gameLoop() {
         break;
       }
 
+      SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
       SDL_RenderClear(renderer);
 
-      SDL_Rect topLeftViewport{0, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2};
-      SDL_SetRenderViewport(renderer, &topLeftViewport);
-      SDL_RenderTexture(renderer, currentTexture, NULL, NULL);
-
-      SDL_Rect topRightViewport{SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2,
-                                SCREEN_HEIGHT / 2};
-      SDL_SetRenderViewport(renderer, &topRightViewport);
-      SDL_RenderTexture(renderer, currentTexture, NULL, NULL);
-
-      SDL_Rect bottomViewport{0, SCREEN_HEIGHT / 2, SCREEN_WIDTH,
-                              SCREEN_HEIGHT / 2};
-      SDL_SetRenderViewport(renderer, &bottomViewport);
-      SDL_RenderTexture(renderer, currentTexture, NULL, NULL);
+      backgroundTexture.render(0, 0);
+      fooTexture.render(240, 190);
 
       SDL_RenderPresent(renderer);
     }
