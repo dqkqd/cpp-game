@@ -1,5 +1,7 @@
 #include "SDL_error.h"
 #include "SDL_log.h"
+#include "SDL_oldnames.h"
+#include "SDL_rect.h"
 #include "SDL_render.h"
 #include "SDL_surface.h"
 #include <SDL3/SDL.h>
@@ -26,6 +28,9 @@ SDL_Surface *currentSurface = NULL;
 
 SDL_Texture *currentTexture = NULL;
 
+constexpr int SCREEN_WIDTH = 640;
+constexpr int SCREEN_HEIGHT = 480;
+
 bool init() {
 
   bool success = true;
@@ -35,7 +40,8 @@ bool init() {
     success = false;
   } else {
 
-    window = SDL_CreateWindow("Hello SDL", 640, 480, SDL_WINDOW_OPENGL);
+    window = SDL_CreateWindow("Hello SDL", SCREEN_WIDTH, SCREEN_HEIGHT,
+                              SDL_WINDOW_OPENGL);
     if (!window) {
       SDL_Log("%s", SDL_GetError());
       success = false;
@@ -150,38 +156,19 @@ void gameLoop() {
         break;
       }
 
-      // user presses a key
-      else if (event.type == SDL_EVENT_KEY_DOWN) {
-        switch (event.key.keysym.sym) {
-        case SDLK_UP:
-          currentSurface =
-              keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_UP)];
-          break;
-        case SDLK_DOWN:
-          currentSurface =
-              keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_DOWN)];
-          break;
-        case SDLK_LEFT:
-          currentSurface =
-              keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_LEFT)];
-          break;
-        case SDLK_RIGHT:
-          currentSurface =
-              keyPressSurfaces[int(KeyPressSurfaces::KEY_PRESS_SURFACE_RIGHT)];
-          break;
-        default:
-          currentSurface = keyPressSurfaces[int(
-              KeyPressSurfaces::KEY_PRESS_SURFACE_DEFAULT)];
-          break;
-        }
+      SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+      SDL_RenderClear(renderer);
+
+      SDL_FRect rect{400, 200, 40.0, 40.0};
+      SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+      SDL_RenderFillRect(renderer, &rect);
+
+      SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
+      for (int i = 0; i < SCREEN_HEIGHT; i += 4) {
+        SDL_RenderPoint(renderer, 400, i);
       }
 
-      SDL_RenderClear(renderer);
-      SDL_RenderTexture(renderer, currentTexture, nullptr, nullptr);
       SDL_RenderPresent(renderer);
-
-      SDL_BlitSurface(currentSurface, nullptr, screenSurface, nullptr);
-      SDL_UpdateWindowSurface(window);
     }
 
     if (quit) {
