@@ -1,12 +1,3 @@
-#include "SDL_error.h"
-#include "SDL_events.h"
-#include "SDL_init.h"
-#include "SDL_keycode.h"
-#include "SDL_log.h"
-#include "SDL_oldnames.h"
-#include "SDL_pixels.h"
-#include "SDL_surface.h"
-#include "SDL_video.h"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 #include <string>
@@ -41,7 +32,13 @@ bool init() {
       SDL_Log("%s", SDL_GetError());
       success = false;
     } else {
-      screenSurface = SDL_GetWindowSurface(window);
+      int imgFlags = IMG_INIT_PNG;
+      if (!(IMG_Init(imgFlags) & imgFlags)) {
+        SDL_Log("%s ", IMG_GetError());
+        success = false;
+      } else {
+        screenSurface = SDL_GetWindowSurface(window);
+      }
     }
   }
 
@@ -56,9 +53,9 @@ void close() {
 }
 
 SDL_Surface *loadSurface(std::string path) {
-  auto loadedSurface = SDL_LoadBMP(path.c_str());
+  auto loadedSurface = IMG_Load(path.c_str());
   if (!loadedSurface) {
-    SDL_Log("%s %s", path.c_str(), SDL_GetError());
+    SDL_Log("%s %s", path.c_str(), IMG_GetError());
     return nullptr;
   }
 
