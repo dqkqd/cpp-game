@@ -156,17 +156,21 @@ void gameLoop() {
         break;
       }
 
-      SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
       SDL_RenderClear(renderer);
 
-      SDL_FRect rect{400, 200, 40.0, 40.0};
-      SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-      SDL_RenderFillRect(renderer, &rect);
+      SDL_Rect topLeftViewport{0, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2};
+      SDL_SetRenderViewport(renderer, &topLeftViewport);
+      SDL_RenderTexture(renderer, currentTexture, NULL, NULL);
 
-      SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
-      for (int i = 0; i < SCREEN_HEIGHT; i += 4) {
-        SDL_RenderPoint(renderer, 400, i);
-      }
+      SDL_Rect topRightViewport{SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2,
+                                SCREEN_HEIGHT / 2};
+      SDL_SetRenderViewport(renderer, &topRightViewport);
+      SDL_RenderTexture(renderer, currentTexture, NULL, NULL);
+
+      SDL_Rect bottomViewport{0, SCREEN_HEIGHT / 2, SCREEN_WIDTH,
+                              SCREEN_HEIGHT / 2};
+      SDL_SetRenderViewport(renderer, &bottomViewport);
+      SDL_RenderTexture(renderer, currentTexture, NULL, NULL);
 
       SDL_RenderPresent(renderer);
     }
