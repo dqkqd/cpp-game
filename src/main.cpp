@@ -15,6 +15,7 @@
 #include "SDL_keycode.h"
 #include "SDL_log.h"
 #include "SDL_pixels.h"
+#include "SDL_rect.h"
 #include "SDL_render.h"
 #include "SDL_scancode.h"
 #include "SDL_timer.h"
@@ -167,13 +168,40 @@ class LTimer {
   bool started_;
 };
 
+bool checkCollision(SDL_FRect a, SDL_FRect b) {
+  int leftA, leftB;
+  int rightA, rightB;
+  int topA, topB;
+  int bottomA, bottomB;
+
+  leftA = a.x;
+  rightA = a.x + a.w;
+  topA = a.y;
+  bottomA = a.y + a.h;
+
+  leftB = b.x;
+  rightB = b.x + b.w;
+  topB = b.y;
+  bottomB = b.y + b.h;
+
+  if (bottomA <= topB || bottomB <= topA || rightA <= leftB ||
+      rightB <= leftA) {
+    return false;
+  }
+
+  return true;
+}
+
 class Dot {
  public:
   static constexpr int DOT_WIDTH = 20;
   static constexpr int DOT_HEIGHT = 20;
   static constexpr int DOT_VEL = 10;
 
-  Dot() : posX_(0), posY_(0), velX_(0), velY_(0) {}
+  Dot() : posX_(0), posY_(0), velX_(0), velY_(0) {
+    collider_.w = DOT_WIDTH;
+    collider_.h = DOT_HEIGHT;
+  }
 
   void handleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.repeat == 0) {
@@ -209,15 +237,21 @@ class Dot {
     }
   }
 
-  void move() {
+  void move(SDL_FRect& wall) {
     posX_ += velX_;
-    if (posX_ < 0 || posX_ + DOT_WIDTH > SCREEN_WIDTH) {
+    collider_.x = posX_;
+    if (posX_ < 0 || posX_ + DOT_WIDTH > SCREEN_WIDTH ||
+        checkCollision(collider_, wall)) {
       posX_ -= velX_;
+      collider_.x = posX_;
     }
 
     posY_ += velY_;
-    if (posY_ < 0 || posY_ + DOT_HEIGHT > SCREEN_HEIGHT) {
+    collider_.y = posY_;
+    if (posY_ < 0 || posY_ + DOT_HEIGHT > SCREEN_HEIGHT ||
+        checkCollision(collider_, wall)) {
       posY_ -= velY_;
+      collider_.y = posY_;
     }
   }
 
@@ -228,6 +262,8 @@ class Dot {
   int posY_;
   int velX_;
   int velY_;
+
+  SDL_FRect collider_;
 };
 
 bool init() {
@@ -304,6 +340,8 @@ void gameLoop() {
   bool quit = false;
   Dot dot;
 
+  SDL_FRect wall{300, 40, 40, 400};
+
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
@@ -313,10 +351,13 @@ void gameLoop() {
       dot.handleEvent(event);
     }
 
-    dot.move();
+    dot.move(wall);
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
+
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderRect(renderer, &wall);
 
     dot.render();
 
