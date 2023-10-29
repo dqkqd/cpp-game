@@ -20,7 +20,9 @@
 #include "SDL_pixels.h"
 #include "SDL_rect.h"
 #include "SDL_render.h"
+#include "SDL_rwops.h"
 #include "SDL_scancode.h"
+#include "SDL_stdinc.h"
 #include "SDL_timer.h"
 
 struct Circle {
@@ -103,6 +105,7 @@ constexpr int LEVEL_WIDTH = 1280;
 constexpr int LEVEL_HEIGHT = 960;
 constexpr int SCREEN_WIDTH = 640;
 constexpr int SCREEN_HEIGHT = 480;
+constexpr int TOTAL_DATA = 100;
 constexpr int SCREEN_FPS = 60;
 constexpr int SCREEN_TICKS_PER_FRAME = 1000 / SCREEN_FPS;
 
@@ -110,8 +113,10 @@ SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
 TTF_Font* font = NULL;
 
+Sint32 data[TOTAL_DATA];
+
 LTexture dotTexture;
-LTexture inputTextTexture;
+LTexture dataTexture[TOTAL_DATA];
 LTexture bgTexture;
 SDL_AudioSpec spec;
 
@@ -321,6 +326,17 @@ bool init() {
 
 void close() {
   dotTexture.free();
+  bgTexture.free();
+
+  auto file = SDL_RWFromFile("assets/16_true_type_fonts/nums.bin", "w+b");
+  if (file) {
+    for (int i = 0; i < TOTAL_DATA; ++i) {
+      SDL_RWwrite(file, &data[i], sizeof(Sint32));
+    }
+    SDL_RWclose(file);
+  } else {
+    SDL_Log("Unable to save file %s", SDL_GetError());
+  }
 
   Mix_CloseAudio();
 
@@ -341,6 +357,27 @@ bool loadMedia() {
   if (font == NULL) {
     SDL_Log("%s", TTF_GetError());
     success = false;
+  }
+
+  auto file = SDL_RWFromFile("assets/16_true_type_fonts/nums.bin", "r+b");
+  if (file == NULL) {
+    SDL_Log("Could not open the file for reading %s", SDL_GetError());
+    file = SDL_RWFromFile("assets/16_true_type_fonts/nums.bin", "w+b");
+    if (file == NULL) {
+      SDL_Log("Could not create file %s", SDL_GetError());
+      success = false;
+    } else {
+      for (int i = 0; i < TOTAL_DATA; ++i) {
+        data[i] = 0;
+        SDL_RWwrite(file, &data[i], sizeof(Sint32));
+      }
+      SDL_RWclose(file);
+    }
+  } else {
+    for (int i = 0; i < TOTAL_DATA; ++i) {
+      SDL_RWread(file, &data[i], sizeof(Sint32));
+    }
+    SDL_RWclose(file);
   }
 
   return success;
@@ -380,9 +417,14 @@ void gameLoop() {
 
   bool renderText = false;
   SDL_Color textColor{0, 0, 0, 255};
-  std::string inputText = "Some Text";
-  inputTextTexture.loadFromRenderedText(inputText.c_str(), textColor);
-  SDL_StartTextInput();
+  SDL_Color highlightColor{255, 0, 0, 255};
+
+  dataTexture[0].loadFromRenderedText(std::to_string(data[0]), highlightColor);
+  for (int i = 1; i < TOTAL_DATA; ++i) {
+    dataTexture[i].loadFromRenderedText(std::to_string(data[i]), textColor);
+  }
+
+  int currentData = 0;
 
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
@@ -390,36 +432,52 @@ void gameLoop() {
         quit = true;
         break;
       } else if (event.type == SDL_EVENT_KEY_DOWN) {
-        if (event.key.keysym.sym == SDLK_BACKSPACE && !inputText.empty()) {
-          inputText.pop_back();
-          renderText = true;
-        } else if (event.key.keysym.sym == SDLK_c &&
-                   SDL_GetModState() & SDL_KMOD_CTRL) {
-          SDL_SetClipboardText(inputText.c_str());
-        } else if (event.key.keysym.sym == SDLK_v &&
-                   SDL_GetModState() & SDL_KMOD_CTRL) {
-          inputText = SDL_GetClipboardText();
-          renderText = true;
-        }
-      } else if (event.type == SDL_EVENT_TEXT_INPUT) {
-        if (!(SDL_GetModState() & SDL_KMOD_CTRL &&
-              (event.text.text[0] == 'c' || event.text.text[0] == 'C' ||
-               event.text.text[0] == 'v' || event.text.text[0] == 'V'))) {
-          inputText += event.text.text;
-          renderText = true;
+        switch (event.key.keysym.sym) {
+          case SDLK_UP:
+            dataTexture[currentData].loadFromRenderedText(
+                std::to_string(data[currentData]), textColor);
+            --currentData;
+            if (currentData < 0) {
+              currentData = TOTAL_DATA - 1;
+            }
+            dataTexture[currentData].loadFromRenderedText(
+
+                std::to_string(data[currentData]), highlightColor);
+            break;
+
+          case SDLK_DOWN:
+            dataTexture[currentData].loadFromRenderedText(
+                std::to_string(data[currentData]), textColor);
+            ++currentData;
+            if (currentData > TOTAL_DATA - 1) {
+              currentData = 0;
+            }
+            dataTexture[currentData].loadFromRenderedText(
+
+                std::to_string(data[currentData]), highlightColor);
+            break;
+
+          case SDLK_LEFT:
+            --data[currentData];
+            dataTexture[currentData].loadFromRenderedText(
+                std::to_string(data[currentData]), textColor);
+            break;
+
+          case SDLK_RIGHT:
+            ++data[currentData];
+            dataTexture[currentData].loadFromRenderedText(
+                std::to_string(data[currentData]), textColor);
+            break;
         }
       }
-    }
-
-    if (renderText) {
-      inputTextTexture.loadFromRenderedText(
-          inputText.empty() ? " " : inputText.c_str(), textColor);
     }
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
 
-    inputTextTexture.render(0, 0);
+    for (int i = 0; i < TOTAL_DATA; ++i) {
+      dataTexture[i].render(0, 40 * i);
+    }
 
     SDL_RenderPresent(renderer);
 
