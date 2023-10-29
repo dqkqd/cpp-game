@@ -21,6 +21,8 @@
 
 constexpr int SCREEN_WIDTH = 640;
 constexpr int SCREEN_HEIGHT = 480;
+constexpr int SCREEN_FPS = 60;
+constexpr int SCREEN_TICKS_PER_FRAME = 1000 / SCREEN_FPS;
 
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
@@ -178,8 +180,7 @@ bool init() {
       SDL_Log("%s", SDL_GetError());
       success = false;
     } else {
-      renderer = SDL_CreateRenderer(
-          window, NULL, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+      renderer = SDL_CreateRenderer(window, NULL, SDL_RENDERER_ACCELERATED);
       if (!renderer) {
         SDL_Log("%s", SDL_GetError());
         success = false;
@@ -242,12 +243,16 @@ void gameLoop() {
   SDL_Color textColor{0, 0, 0, 255};
   uint32_t startTime = 0;
   std::stringstream timeText;
+
   LTimer fpsTimer;
+  LTimer capTimer;
 
   int countedFrames = 0;
   fpsTimer.start();
 
   while (!quit) {
+    capTimer.start();
+
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
@@ -274,6 +279,11 @@ void gameLoop() {
 
     SDL_RenderPresent(renderer);
     ++countedFrames;
+
+    int frameTicks = capTimer.getTicks();
+    if (frameTicks < SCREEN_TICKS_PER_FRAME) {
+      SDL_Delay(SCREEN_TICKS_PER_FRAME - frameTicks);
+    }
 
     if (quit) {
       break;
