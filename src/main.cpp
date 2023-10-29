@@ -82,24 +82,24 @@ class Dot {
  public:
   static constexpr int DOT_WIDTH = 20;
   static constexpr int DOT_HEIGHT = 20;
-  static constexpr int DOT_VEL = 1;
+  static constexpr int DOT_VEL = 10;
 
-  Dot(int x, int y);
+  Dot(int x = 0, int y = 0);
   void handleEvent(SDL_Event& e);
-  void move(SDL_FRect& square, Circle& circle);
-  void render();
-  Circle& getCollider();
+  void move();
+  void render(int camX, int camY);
+  int getPosX();
+  int getPosY();
 
  private:
   int posX_;
   int posY_;
   int velX_;
   int velY_;
-
-  Circle collider_;
-  void shiftColliders();
 };
 
+constexpr int LEVEL_WIDTH = 1280;
+constexpr int LEVEL_HEIGHT = 960;
 constexpr int SCREEN_WIDTH = 640;
 constexpr int SCREEN_HEIGHT = 480;
 constexpr int SCREEN_FPS = 60;
@@ -110,6 +110,7 @@ SDL_Renderer* renderer = NULL;
 TTF_Font* font = NULL;
 
 LTexture dotTexture;
+LTexture bgTexture;
 SDL_AudioSpec spec;
 
 LTexture::~LTexture() { free(); }
@@ -218,10 +219,7 @@ uint32_t LTimer::getTicks() {
 bool LTimer::isStarted() { return started_; }
 bool LTimer::isPaused() { return paused_; }
 
-Dot::Dot(int x, int y) : posX_(x), posY_(y), velX_(0), velY_(0) {
-  collider_.r = DOT_WIDTH / 2;
-  shiftColliders();
-}
+Dot::Dot(int x, int y) : posX_(x), posY_(y), velX_(0), velY_(0) {}
 void Dot::handleEvent(SDL_Event& e) {
   if (e.type == SDL_EVENT_KEY_DOWN && e.key.repeat == 0) {
     switch (e.key.keysym.sym) {
@@ -255,32 +253,22 @@ void Dot::handleEvent(SDL_Event& e) {
     }
   }
 }
-void Dot::move(SDL_FRect& square, Circle& circle) {
+void Dot::move() {
   posX_ += velX_;
-  shiftColliders();
-
-  if (posX_ < 0 || posX_ + DOT_WIDTH > SCREEN_WIDTH ||
-      checkCollision(collider_, square) || checkCollision(collider_, circle)) {
+  if (posX_ < 0 || posX_ + DOT_WIDTH > SCREEN_WIDTH) {
     posX_ -= velX_;
-    shiftColliders();
   }
 
   posY_ += velY_;
-  shiftColliders();
-  if (posY_ < 0 || posY_ + DOT_HEIGHT > SCREEN_HEIGHT ||
-      checkCollision(collider_, square) || checkCollision(collider_, circle)) {
+  if (posY_ < 0 || posY_ + DOT_HEIGHT > SCREEN_HEIGHT) {
     posY_ -= velY_;
-    shiftColliders();
   }
 }
-void Dot::render() {
-  dotTexture.render(posX_ - collider_.r, posY_ - collider_.r);
+void Dot::render(int camX, int camY) {
+  dotTexture.render(posX_ - camX, posY_ - camY);
 }
-void Dot::shiftColliders() {
-  collider_.x = posX_;
-  collider_.y = posY_;
-}
-Circle& Dot::getCollider() { return collider_; }
+int Dot::getPosX() { return posX_; }
+int Dot::getPosY() { return posY_; }
 
 bool init() {
   bool success = true;
@@ -348,8 +336,10 @@ void close() {
 
 bool loadMedia() {
   bool success = true;
-  if (!dotTexture.loadFromFile(
-          "assets/29_circular_collision_detection/dot.bmp")) {
+  if (!dotTexture.loadFromFile("assets/30_scrolling/dot.bmp")) {
+    success = false;
+  }
+  if (!bgTexture.loadFromFile("assets/30_scrolling/bg.png")) {
     success = false;
   }
   return success;
@@ -387,9 +377,7 @@ void gameLoop() {
 
   bool quit = false;
   Dot dot(0, 0);
-  Dot otherDot(SCREEN_WIDTH / 4, SCREEN_HEIGHT / 4);
-
-  SDL_FRect wall{300, 40, 40, 400};
+  SDL_FRect camera{0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
 
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
@@ -400,16 +388,23 @@ void gameLoop() {
       dot.handleEvent(event);
     }
 
-    dot.move(wall, otherDot.getCollider());
+    dot.move();
+    camera.x = (dot.getPosX() + Dot::DOT_WIDTH / 2.0) - (SCREEN_WIDTH / 2.0);
+    camera.y = (dot.getPosY() + Dot::DOT_HEIGHT / 2.0) - (SCREEN_HEIGHT / 2.0);
+
+    camera.x = std::max(0.0f, camera.x);
+    camera.y = std::max(0.0f, camera.y);
+    camera.x = std::min(camera.x, LEVEL_WIDTH - camera.w);
+    camera.y = std::min(camera.y, LEVEL_HEIGHT - camera.h);
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
 
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderRect(renderer, &wall);
+    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+    SDL_RenderRect(renderer, &camera);
 
-    dot.render();
-    otherDot.render();
+    bgTexture.render(0, 0, &camera);
+    dot.render(camera.x, camera.y);
 
     SDL_RenderPresent(renderer);
 
