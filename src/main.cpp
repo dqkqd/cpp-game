@@ -107,7 +107,7 @@ class LTexture {
   int height_;
 };
 
-LTexture promptTexture;
+LTexture dotTexture;
 
 class LTimer {
  public:
@@ -167,6 +167,69 @@ class LTimer {
   bool started_;
 };
 
+class Dot {
+ public:
+  static constexpr int DOT_WIDTH = 20;
+  static constexpr int DOT_HEIGHT = 20;
+  static constexpr int DOT_VEL = 10;
+
+  Dot() : posX_(0), posY_(0), velX_(0), velY_(0) {}
+
+  void handleEvent(SDL_Event& e) {
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.repeat == 0) {
+      switch (e.key.keysym.sym) {
+        case SDLK_UP:
+          velY_ -= DOT_VEL;
+          break;
+        case SDLK_DOWN:
+          velY_ += DOT_VEL;
+          break;
+        case SDLK_LEFT:
+          velX_ -= DOT_VEL;
+          break;
+        case SDLK_RIGHT:
+          velX_ += DOT_VEL;
+          break;
+      }
+    } else if (e.type == SDL_EVENT_KEY_UP && e.key.repeat == 0) {
+      switch (e.key.keysym.sym) {
+        case SDLK_UP:
+          velY_ += DOT_VEL;
+          break;
+        case SDLK_DOWN:
+          velY_ -= DOT_VEL;
+          break;
+        case SDLK_LEFT:
+          velX_ += DOT_VEL;
+          break;
+        case SDLK_RIGHT:
+          velX_ -= DOT_VEL;
+          break;
+      }
+    }
+  }
+
+  void move() {
+    posX_ += velX_;
+    if (posX_ < 0 || posX_ + DOT_WIDTH > SCREEN_WIDTH) {
+      posX_ -= velX_;
+    }
+
+    posY_ += velY_;
+    if (posY_ < 0 || posY_ + DOT_HEIGHT > SCREEN_HEIGHT) {
+      posY_ -= velY_;
+    }
+  }
+
+  void render() { dotTexture.render(posX_, posY_); }
+
+ private:
+  int posX_;
+  int posY_;
+  int velX_;
+  int velY_;
+};
+
 bool init() {
   bool success = true;
 
@@ -180,7 +243,8 @@ bool init() {
       SDL_Log("%s", SDL_GetError());
       success = false;
     } else {
-      renderer = SDL_CreateRenderer(window, NULL, SDL_RENDERER_ACCELERATED);
+      renderer = SDL_CreateRenderer(
+          window, NULL, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
       if (!renderer) {
         SDL_Log("%s", SDL_GetError());
         success = false;
@@ -212,7 +276,7 @@ bool init() {
 }
 
 void close() {
-  promptTexture.free();
+  dotTexture.free();
 
   Mix_CloseAudio();
 
@@ -228,9 +292,7 @@ void close() {
 
 bool loadMedia() {
   bool success = true;
-  font = TTF_OpenFont("assets/22_timing/lazy.ttf", 28);
-  if (font == NULL) {
-    SDL_Log("%s", TTF_GetError());
+  if (!dotTexture.loadFromFile("assets/26_motion/dot.bmp")) {
     success = false;
   }
   return success;
@@ -240,50 +302,25 @@ void gameLoop() {
   SDL_Event event;
 
   bool quit = false;
-  SDL_Color textColor{0, 0, 0, 255};
-  uint32_t startTime = 0;
-  std::stringstream timeText;
-
-  LTimer fpsTimer;
-  LTimer capTimer;
-
-  int countedFrames = 0;
-  fpsTimer.start();
+  Dot dot;
 
   while (!quit) {
-    capTimer.start();
-
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
       }
+      dot.handleEvent(event);
     }
 
-    float avgFps = countedFrames / (fpsTimer.getTicks() / 1000.f);
-    if (avgFps > 2'000'000) {
-      avgFps = 0;
-    }
-
-    timeText.str("");
-    timeText << "Average Frames per second: " << avgFps;
-
-    LTexture timeTexture;
-    timeTexture.loadFromRenderedText(timeText.str(), textColor);
+    dot.move();
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
 
-    timeTexture.render((SCREEN_WIDTH - timeTexture.getWidth()) / 2,
-                       (SCREEN_HEIGHT - timeTexture.getHeight()) / 2);
+    dot.render();
 
     SDL_RenderPresent(renderer);
-    ++countedFrames;
-
-    int frameTicks = capTimer.getTicks();
-    if (frameTicks < SCREEN_TICKS_PER_FRAME) {
-      SDL_Delay(SCREEN_TICKS_PER_FRAME - frameTicks);
-    }
 
     if (quit) {
       break;
