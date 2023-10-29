@@ -28,12 +28,6 @@ TTF_Font* font = NULL;
 
 SDL_AudioSpec spec;
 
-Mix_Music* music = NULL;
-Mix_Chunk* scratch = NULL;
-Mix_Chunk* high = NULL;
-Mix_Chunk* medium = NULL;
-Mix_Chunk* low = NULL;
-
 class LTexture {
  public:
   LTexture() {}
@@ -113,6 +107,64 @@ class LTexture {
 
 LTexture promptTexture;
 
+class LTimer {
+ public:
+  LTimer() : started_(false), paused_(false), startTicks_(0), pausedTicks_(0) {}
+
+  void start() {
+    started_ = true;
+    paused_ = false;
+
+    startTicks_ = SDL_GetTicks();
+    pausedTicks_ = 0;
+  }
+
+  void stop() {
+    started_ = false;
+    paused_ = false;
+
+    startTicks_ = 0;
+    pausedTicks_ = 0;
+  }
+
+  void pause() {
+    if (started_ && !paused_) {
+      paused_ = true;
+      pausedTicks_ = SDL_GetTicks() - startTicks_;
+      startTicks_ = 0;
+    }
+  }
+
+  void unpause() {
+    if (started_ && paused_) {
+      paused_ = false;
+      startTicks_ = SDL_GetTicks() - pausedTicks_;
+      pausedTicks_ = 0;
+    }
+  }
+
+  uint32_t getTicks() {
+    uint32_t time = 0;
+    if (started_) {
+      if (paused_) {
+        time = pausedTicks_;
+      } else {
+        time = SDL_GetTicks() - startTicks_;
+      }
+    }
+    return time;
+  }
+
+  bool isStarted() { return started_; }
+  bool isPaused() { return paused_; }
+
+ private:
+  uint32_t startTicks_;
+  uint32_t pausedTicks_;
+  bool paused_;
+  bool started_;
+};
+
 bool init() {
   bool success = true;
 
@@ -162,11 +214,6 @@ void close() {
   promptTexture.free();
 
   Mix_CloseAudio();
-  Mix_FreeMusic(music);
-  Mix_FreeChunk(scratch);
-  Mix_FreeChunk(high);
-  Mix_FreeChunk(medium);
-  Mix_FreeChunk(low);
 
   TTF_CloseFont(font);
   SDL_DestroyRenderer(renderer);
@@ -184,12 +231,6 @@ bool loadMedia() {
   if (font == NULL) {
     SDL_Log("%s", TTF_GetError());
     success = false;
-  } else {
-    SDL_Color textColor{0, 0, 0, 255};
-    if (!promptTexture.loadFromRenderedText("Press Enter to Reset Start Time.",
-                                            textColor)) {
-      success = false;
-    }
   }
   return success;
 }
@@ -201,29 +242,44 @@ void gameLoop() {
   SDL_Color textColor{0, 0, 0, 255};
   uint32_t startTime = 0;
   std::stringstream timeText;
+  LTimer timer;
 
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
-      } else if (event.type == SDL_EVENT_KEY_DOWN &&
-                 event.key.keysym.sym == SDLK_RETURN) {
-        startTime = SDL_GetTicks();
+      } else if (event.type == SDL_EVENT_KEY_DOWN) {
+        switch (event.key.keysym.sym) {
+          case SDLK_s:
+            if (timer.isStarted()) {
+              timer.stop();
+            } else {
+              timer.start();
+            }
+            break;
+          case SDLK_p:
+            if (timer.isPaused()) {
+              timer.unpause();
+            } else {
+              timer.pause();
+            }
+            break;
+        }
       }
     }
 
     timeText.str("");
-    timeText << "Milliseconds since start time: " << SDL_GetTicks() - startTime;
+    timeText << "Milliseconds since start time: " << timer.getTicks();
+
     LTexture timeTexture;
     timeTexture.loadFromRenderedText(timeText.str(), textColor);
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
 
-    promptTexture.render((SCREEN_WIDTH - promptTexture.getWidth()) / 2, 0);
     timeTexture.render((SCREEN_WIDTH - timeTexture.getWidth()) / 2,
-                       (SCREEN_HEIGHT - promptTexture.getHeight()) / 2);
+                       (SCREEN_HEIGHT - timeTexture.getHeight()) / 2);
 
     SDL_RenderPresent(renderer);
 
