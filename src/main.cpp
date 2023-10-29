@@ -1,3 +1,5 @@
+#include "SDL_blendmode.h"
+#include "SDL_render.h"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 #include <cstddef>
@@ -36,6 +38,12 @@ public:
     }
   }
 
+  void setBlendMode(SDL_BlendMode blending) {
+    SDL_SetTextureBlendMode(texture_, blending);
+  }
+
+  void setAlpha(uint8_t alpha) { SDL_SetTextureAlphaMod(texture_, alpha); }
+
   bool loadFromFile(std::string path) {
     free();
     texture_ = IMG_LoadTexture(renderer, path.c_str());
@@ -66,6 +74,7 @@ SDL_Surface *screenSurface = NULL;
 SDL_Surface *currentSurface = NULL;
 
 LTexture modulatedTexture;
+LTexture backgroundTexture;
 
 constexpr int SCREEN_WIDTH = 640;
 constexpr int SCREEN_HEIGHT = 480;
@@ -115,7 +124,13 @@ void close() {
 bool loadMedia() {
   bool success = true;
 
-  if (!modulatedTexture.loadFromFile("assets/12_color_modulation/colors.png")) {
+  if (!modulatedTexture.loadFromFile("assets/13_alpha_blending/fadeout.png")) {
+    success = false;
+  } else {
+    modulatedTexture.setBlendMode(SDL_BLENDMODE_BLEND);
+  }
+
+  if (!backgroundTexture.loadFromFile("assets/13_alpha_blending/fadein.png")) {
     success = false;
   }
 
@@ -127,9 +142,7 @@ void gameLoop() {
   SDL_Event event;
 
   bool quit = false;
-  uint8_t r = 255;
-  uint8_t g = 255;
-  uint8_t b = 255;
+  uint8_t a = 255;
 
   while (!quit) {
     while (SDL_PollEvent(&event)) {
@@ -138,30 +151,20 @@ void gameLoop() {
         break;
       } else if (event.type == SDL_EVENT_KEY_DOWN) {
         switch (event.key.keysym.sym) {
-        case SDLK_q:
-          r += 32;
-          break;
         case SDLK_w:
-          g += 32;
-          break;
-        case SDLK_e:
-          b += 32;
-          break;
-        case SDLK_a:
-          r -= 32;
+          a = std::min(255, a + 32);
           break;
         case SDLK_s:
-          g -= 32;
-          break;
-        case SDLK_d:
-          b -= 32;
+          a = std::max(0, a - 32);
           break;
         }
       }
 
       SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
       SDL_RenderClear(renderer);
-      modulatedTexture.setColor(r, g, b);
+      backgroundTexture.render(0, 0);
+
+      modulatedTexture.setAlpha(a);
       modulatedTexture.render(0, 0);
       SDL_RenderPresent(renderer);
     }
