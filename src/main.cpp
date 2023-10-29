@@ -6,12 +6,8 @@
 #include <cstdint>
 #include <string>
 
-#include "SDL_blendmode.h"
-#include "SDL_error.h"
 #include "SDL_events.h"
-#include "SDL_log.h"
 #include "SDL_render.h"
-#include "SDL_surface.h"
 
 constexpr int SCREEN_WIDTH = 640;
 constexpr int SCREEN_HEIGHT = 480;
@@ -19,6 +15,17 @@ constexpr int SCREEN_HEIGHT = 480;
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
 TTF_Font* font = NULL;
+
+constexpr int BUTTON_WIDTH = 300;
+constexpr int BUTTON_HEIGHT = 200;
+constexpr int TOTAL_BUTTONS = 4;
+enum class LButtonSprite {
+  BUTTON_SPRITE_MOUSE_OUT = 0,
+  BUTTON_SPRITE_MOUSE_OVER_MOTION = 1,
+  BUTTON_SPRITE_MOUSE_DOWN = 2,
+  BUTTON_SPRITE_MOUSE_UP = 3,
+  BUTTON_SPRITE_TOTAL = 4,
+};
 
 class LTexture {
  public:
@@ -98,6 +105,59 @@ class LTexture {
 };
 
 LTexture currentTexture;
+SDL_FRect spriteClips[TOTAL_BUTTONS];
+
+class LButton {
+ public:
+  LButton()
+      : position_{0, 0},
+        currentSprite(LButtonSprite::BUTTON_SPRITE_MOUSE_OUT) {}
+
+  void setPosition(int x, int y) {
+    position_.x = x;
+    position_.y = y;
+  }
+
+  void handleEvent(SDL_Event* e) {
+    if (e->type == SDL_EVENT_MOUSE_MOTION ||
+        e->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+        e->type == SDL_EVENT_MOUSE_BUTTON_UP) {
+      float x, y;
+      SDL_GetMouseState(&x, &y);
+
+      bool inside = x < position_.x || x > position_.x + BUTTON_WIDTH ||
+                    y < position_.y || y > position_.y + BUTTON_HEIGHT;
+
+      if (!inside) {
+        currentSprite = LButtonSprite::BUTTON_SPRITE_MOUSE_OUT;
+      } else {
+        switch (e->type) {
+          case SDL_EVENT_MOUSE_MOTION:
+            currentSprite = LButtonSprite::BUTTON_SPRITE_MOUSE_OVER_MOTION;
+            break;
+
+          case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            currentSprite = LButtonSprite::BUTTON_SPRITE_MOUSE_DOWN;
+            break;
+
+          case SDL_EVENT_MOUSE_BUTTON_UP:
+            currentSprite = LButtonSprite::BUTTON_SPRITE_MOUSE_UP;
+            break;
+        }
+      }
+    }
+  }
+  void render() {
+    currentTexture.render(position_.x, position_.y,
+                          &spriteClips[int(currentSprite)]);
+  }
+
+ private:
+  SDL_Point position_;
+  LButtonSprite currentSprite;
+};
+
+LButton buttons[TOTAL_BUTTONS];
 
 bool init() {
   bool success = true;
@@ -150,16 +210,24 @@ void close() {
 bool loadMedia() {
   bool success = true;
 
-  font = TTF_OpenFont("assets/16_true_type_fonts/lazy.ttf", 28);
-  if (font == NULL) {
-    SDL_Log("%s", TTF_GetError());
+  if (!currentTexture.loadFromFile("assets/17_mouse_events/button.png")) {
+    printf("Failed to load button sprite texture!\n");
     success = false;
   } else {
-    SDL_Color textColor{0, 0, 0};
-    if (!currentTexture.loadFromRenderedText(
-            "The quick brown fox jumps over the lazy dog", textColor)) {
-      success = false;
+    // Set sprites
+    for (int i = 0; i < TOTAL_BUTTONS; ++i) {
+      spriteClips[i].x = 0;
+      spriteClips[i].y = i * 200;
+      spriteClips[i].w = BUTTON_WIDTH;
+      spriteClips[i].h = BUTTON_HEIGHT;
     }
+
+    // Set buttons in corners
+    buttons[0].setPosition(0, 0);
+    buttons[1].setPosition(SCREEN_WIDTH - BUTTON_WIDTH, 0);
+    buttons[2].setPosition(0, SCREEN_HEIGHT - BUTTON_HEIGHT);
+    buttons[3].setPosition(SCREEN_WIDTH - BUTTON_WIDTH,
+                           SCREEN_HEIGHT - BUTTON_HEIGHT);
   }
 
   return success;
@@ -176,13 +244,17 @@ void gameLoop() {
         quit = true;
         break;
       }
+      for (int i = 0; i < TOTAL_BUTTONS; ++i) {
+        buttons[i].handleEvent(&event);
+      }
     }
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
 
-    currentTexture.render((SCREEN_WIDTH - currentTexture.getWidth()) / 2,
-                          (SCREEN_HEIGHT - currentTexture.getHeight()) / 2);
+    for (int i = 0; i < TOTAL_BUTTONS; ++i) {
+      buttons[i].render();
+    }
 
     SDL_RenderPresent(renderer);
 
