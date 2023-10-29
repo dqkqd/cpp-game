@@ -87,7 +87,7 @@ class Dot {
   Dot(int x = 0, int y = 0);
   void handleEvent(SDL_Event& e);
   void move();
-  void render(int camX, int camY);
+  void render();
   int getPosX();
   int getPosY();
 
@@ -264,9 +264,7 @@ void Dot::move() {
     posY_ -= velY_;
   }
 }
-void Dot::render(int camX, int camY) {
-  dotTexture.render(posX_ - camX, posY_ - camY);
-}
+void Dot::render() { dotTexture.render(posX_, posY_); }
 int Dot::getPosX() { return posX_; }
 int Dot::getPosY() { return posY_; }
 
@@ -377,7 +375,7 @@ void gameLoop() {
 
   bool quit = false;
   Dot dot(0, 0);
-  SDL_FRect camera{0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
+  int scrollingOffset = 0;
 
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
@@ -389,22 +387,16 @@ void gameLoop() {
     }
 
     dot.move();
-    camera.x = (dot.getPosX() + Dot::DOT_WIDTH / 2.0) - (SCREEN_WIDTH / 2.0);
-    camera.y = (dot.getPosY() + Dot::DOT_HEIGHT / 2.0) - (SCREEN_HEIGHT / 2.0);
-
-    camera.x = std::max(0.0f, camera.x);
-    camera.y = std::max(0.0f, camera.y);
-    camera.x = std::min(camera.x, LEVEL_WIDTH - camera.w);
-    camera.y = std::min(camera.y, LEVEL_HEIGHT - camera.h);
+    scrollingOffset -= 10;
+    if (scrollingOffset < -bgTexture.getWidth()) {
+      scrollingOffset = 0;
+    }
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
 
-    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-    SDL_RenderRect(renderer, &camera);
-
-    bgTexture.render(0, 0, &camera);
-    dot.render(camera.x, camera.y);
+    bgTexture.render(scrollingOffset, 0);
+    bgTexture.render(scrollingOffset + bgTexture.getWidth(), 0);
 
     SDL_RenderPresent(renderer);
 
