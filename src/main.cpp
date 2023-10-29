@@ -1,5 +1,6 @@
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -10,18 +11,14 @@
 #include "SDL_events.h"
 #include "SDL_log.h"
 #include "SDL_render.h"
+#include "SDL_surface.h"
 
-enum class KeyPressSurfaces {
-  KEY_PRESS_SURFACE_DEFAULT,
-  KEY_PRESS_SURFACE_UP,
-  KEY_PRESS_SURFACE_DOWN,
-  KEY_PRESS_SURFACE_LEFT,
-  KEY_PRESS_SURFACE_RIGHT,
-  KEY_PRESS_SURFACE_TOTAL
-};
+constexpr int SCREEN_WIDTH = 640;
+constexpr int SCREEN_HEIGHT = 480;
 
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
+TTF_Font* font = NULL;
 
 class LTexture {
  public:
@@ -60,6 +57,25 @@ class LTexture {
     return true;
   }
 
+  bool loadFromRenderedText(std::string textureText, SDL_Color textColor) {
+    free();
+    auto textSurface =
+        TTF_RenderText_Solid(font, textureText.c_str(), textColor);
+    if (textSurface == NULL) {
+      SDL_Log("%s", TTF_GetError());
+    } else {
+      texture_ = SDL_CreateTextureFromSurface(renderer, textSurface);
+      if (texture_ == NULL) {
+        SDL_Log("%s", SDL_GetError());
+      } else {
+        width_ = textSurface->w;
+        height_ = textSurface->h;
+      }
+      SDL_DestroySurface(textSurface);
+    }
+    return texture_ != NULL;
+  }
+
   int getWidth() { return width_; }
   int getHeight() { return height_; }
 
@@ -80,11 +96,6 @@ class LTexture {
   int width_;
   int height_;
 };
-
-SDL_Surface* screenSurface = NULL;
-
-constexpr int SCREEN_WIDTH = 640;
-constexpr int SCREEN_HEIGHT = 480;
 
 LTexture currentTexture;
 
@@ -111,8 +122,11 @@ bool init() {
         if (!(IMG_Init(imgFlags) & imgFlags)) {
           SDL_Log("%s ", IMG_GetError());
           success = false;
-        } else {
-          screenSurface = SDL_GetWindowSurface(window);
+        }
+
+        if (TTF_Init() < 0) {
+          SDL_Log("Couldn't init ttf %s", TTF_GetError());
+          success = false;
         }
       }
     }
@@ -122,19 +136,30 @@ bool init() {
 }
 
 void close() {
-  SDL_DestroySurface(screenSurface);
+  currentTexture.free();
+
+  TTF_CloseFont(font);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
+
+  TTF_Quit();
+  IMG_Quit();
   SDL_Quit();
 }
 
 bool loadMedia() {
   bool success = true;
 
-  if (!currentTexture.loadFromFile(
-          "assets/15_rotation_and_flipping/arrow.png")) {
-    SDL_Log("%s", SDL_GetError());
+  font = TTF_OpenFont("assets/16_true_type_fonts/lazy.ttf", 28);
+  if (font == NULL) {
+    SDL_Log("%s", TTF_GetError());
     success = false;
+  } else {
+    SDL_Color textColor{0, 0, 0};
+    if (!currentTexture.loadFromRenderedText(
+            "The quick brown fox jumps over the lazy dog", textColor)) {
+      success = false;
+    }
   }
 
   return success;
@@ -144,32 +169,12 @@ void gameLoop() {
   SDL_Event event;
 
   bool quit = false;
-  double degrees = 0;
-  SDL_RendererFlip flipType = SDL_FLIP_NONE;
 
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
-      } else if (event.type == SDL_EVENT_KEY_DOWN) {
-        switch (event.key.keysym.sym) {
-          case SDLK_a:
-            degrees -= 60;
-            break;
-          case SDLK_d:
-            degrees += 60;
-            break;
-          case SDLK_q:
-            flipType = SDL_FLIP_HORIZONTAL;
-            break;
-          case SDLK_w:
-            flipType = SDL_FLIP_NONE;
-            break;
-          case SDLK_e:
-            flipType = SDL_FLIP_VERTICAL;
-            break;
-        }
       }
     }
 
@@ -177,8 +182,8 @@ void gameLoop() {
     SDL_RenderClear(renderer);
 
     currentTexture.render((SCREEN_WIDTH - currentTexture.getWidth()) / 2,
-                          (SCREEN_HEIGHT - currentTexture.getHeight()) / 2,
-                          NULL, degrees, NULL, flipType);
+                          (SCREEN_HEIGHT - currentTexture.getHeight()) / 2);
+
     SDL_RenderPresent(renderer);
 
     if (quit) {
