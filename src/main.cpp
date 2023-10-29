@@ -1,13 +1,17 @@
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
+#include <SDL3_mixer/SDL_mixer.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
 
+#include "SDL_error.h"
 #include "SDL_events.h"
+#include "SDL_init.h"
 #include "SDL_keyboard.h"
+#include "SDL_log.h"
 #include "SDL_render.h"
 #include "SDL_scancode.h"
 
@@ -18,16 +22,13 @@ SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
 TTF_Font* font = NULL;
 
-constexpr int BUTTON_WIDTH = 300;
-constexpr int BUTTON_HEIGHT = 200;
-constexpr int TOTAL_BUTTONS = 4;
-enum class LButtonSprite {
-  BUTTON_SPRITE_MOUSE_OUT = 0,
-  BUTTON_SPRITE_MOUSE_OVER_MOTION = 1,
-  BUTTON_SPRITE_MOUSE_DOWN = 2,
-  BUTTON_SPRITE_MOUSE_UP = 3,
-  BUTTON_SPRITE_TOTAL = 4,
-};
+SDL_AudioSpec spec;
+
+Mix_Music* music = NULL;
+Mix_Chunk* scratch = NULL;
+Mix_Chunk* high = NULL;
+Mix_Chunk* medium = NULL;
+Mix_Chunk* low = NULL;
 
 class LTexture {
  public:
@@ -106,16 +107,12 @@ class LTexture {
   int height_;
 };
 
-LTexture upTexture;
-LTexture downTexture;
-LTexture leftTexture;
-LTexture rightTexture;
-LTexture pressTexture;
+LTexture promptTexture;
 
 bool init() {
   bool success = true;
 
-  if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
     SDL_Log("SDL_Init failed (%s)", SDL_GetError());
     success = false;
   } else {
@@ -141,6 +138,15 @@ bool init() {
           SDL_Log("Couldn't init ttf %s", TTF_GetError());
           success = false;
         }
+
+        spec.freq = MIX_DEFAULT_FREQUENCY;
+        spec.format = MIX_DEFAULT_FORMAT;
+        spec.channels = MIX_DEFAULT_CHANNELS;
+
+        if (Mix_OpenAudio(0, &spec) < 0) {
+          SDL_Log("Couldn't open audio %s", Mix_GetError());
+          success = false;
+        }
       }
     }
   }
@@ -149,10 +155,20 @@ bool init() {
 }
 
 void close() {
+  promptTexture.free();
+
+  Mix_CloseAudio();
+  Mix_FreeMusic(music);
+  Mix_FreeChunk(scratch);
+  Mix_FreeChunk(high);
+  Mix_FreeChunk(medium);
+  Mix_FreeChunk(low);
+
   TTF_CloseFont(font);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
 
+  Mix_Quit();
   TTF_Quit();
   IMG_Quit();
   SDL_Quit();
@@ -160,11 +176,42 @@ void close() {
 
 bool loadMedia() {
   bool success = true;
-  upTexture.loadFromFile("assets/18_key_states/up.png");
-  downTexture.loadFromFile("assets/18_key_states/down.png");
-  leftTexture.loadFromFile("assets/18_key_states/left.png");
-  rightTexture.loadFromFile("assets/18_key_states/right.png");
-  pressTexture.loadFromFile("assets/18_key_states/press.png");
+
+  if (!promptTexture.loadFromFile(
+          "assets/21_sound_effects_and_music/prompt.png")) {
+    success = false;
+  }
+
+  music = Mix_LoadMUS("assets/21_sound_effects_and_music/beat.wav");
+  if (music == NULL) {
+    SDL_Log("%s", Mix_GetError());
+    success = false;
+  }
+
+  scratch = Mix_LoadWAV("assets/21_sound_effects_and_music/scratch.wav");
+  if (scratch == NULL) {
+    SDL_Log("%s", Mix_GetError());
+    success = false;
+  }
+
+  high = Mix_LoadWAV("assets/21_sound_effects_and_music/high.wav");
+  if (high == NULL) {
+    SDL_Log("%s", Mix_GetError());
+    success = false;
+  }
+
+  medium = Mix_LoadWAV("assets/21_sound_effects_and_music/medium.wav");
+  if (medium == NULL) {
+    SDL_Log("%s", Mix_GetError());
+    success = false;
+  }
+
+  low = Mix_LoadWAV("assets/21_sound_effects_and_music/low.wav");
+  if (low == NULL) {
+    SDL_Log("%s", Mix_GetError());
+    success = false;
+  }
+
   return success;
 }
 
@@ -173,32 +220,52 @@ void gameLoop() {
 
   bool quit = false;
 
-  LTexture* currentTexture;
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
-      }
+      } else if (event.type == SDL_EVENT_KEY_DOWN) {
+        switch (event.key.keysym.sym) {
+          case SDLK_1:
+            Mix_PlayChannel(-1, high, 0);
+            break;
 
-      auto currentKeyState = SDL_GetKeyboardState(NULL);
-      if (currentKeyState[SDL_SCANCODE_UP]) {
-        currentTexture = &upTexture;
-      } else if (currentKeyState[SDL_SCANCODE_DOWN]) {
-        currentTexture = &downTexture;
-      } else if (currentKeyState[SDL_SCANCODE_LEFT]) {
-        currentTexture = &leftTexture;
-      } else if (currentKeyState[SDL_SCANCODE_RIGHT]) {
-        currentTexture = &rightTexture;
-      } else {
-        currentTexture = &pressTexture;
+          case SDLK_2:
+            Mix_PlayChannel(-1, medium, 0);
+            break;
+
+          case SDLK_3:
+            Mix_PlayChannel(-1, low, 0);
+            break;
+
+          case SDLK_4:
+            Mix_PlayChannel(-1, scratch, 0);
+            break;
+
+          case SDLK_9:
+            if (!Mix_PlayingMusic()) {
+              Mix_PlayMusic(music, -1);
+            } else {
+              if (Mix_PausedMusic()) {
+                Mix_ResumeMusic();
+              } else {
+                Mix_PauseMusic();
+              }
+            }
+            break;
+
+          case SDLK_0:
+            Mix_HaltMusic();
+            break;
+        }
       }
     }
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
 
-    currentTexture->render(0, 0);
+    promptTexture.render(0, 0);
 
     SDL_RenderPresent(renderer);
 
