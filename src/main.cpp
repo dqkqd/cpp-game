@@ -22,11 +22,18 @@
 #include "SDL_scancode.h"
 #include "SDL_timer.h"
 
+struct Circle {
+  int x, y;
+  int r;
+};
+
 bool init();
 void close();
 bool loadMedia();
 void gameLoop();
-bool checkCollision(std::vector<SDL_FRect>& a, std::vector<SDL_FRect>& b);
+bool checkCollision(Circle& a, Circle& b);
+bool checkCollision(Circle& a, SDL_FRect& b);
+double distanceSquared(int x1, int y1, int x2, int y2);
 
 class LTexture {
  public:
@@ -79,9 +86,9 @@ class Dot {
 
   Dot(int x, int y);
   void handleEvent(SDL_Event& e);
-  void move(std::vector<SDL_FRect>& otherColliders);
+  void move(SDL_FRect& square, Circle& circle);
   void render();
-  std::vector<SDL_FRect>& getColliders();
+  Circle& getCollider();
 
  private:
   int posX_;
@@ -89,7 +96,7 @@ class Dot {
   int velX_;
   int velY_;
 
-  std::vector<SDL_FRect> colliders_;
+  Circle collider_;
   void shiftColliders();
 };
 
@@ -212,41 +219,7 @@ bool LTimer::isStarted() { return started_; }
 bool LTimer::isPaused() { return paused_; }
 
 Dot::Dot(int x, int y) : posX_(x), posY_(y), velX_(0), velY_(0) {
-  colliders_.resize(11);
-
-  colliders_[0].w = 6;
-  colliders_[0].h = 1;
-
-  colliders_[1].w = 10;
-  colliders_[1].h = 1;
-
-  colliders_[2].w = 14;
-  colliders_[2].h = 1;
-
-  colliders_[3].w = 16;
-  colliders_[3].h = 2;
-
-  colliders_[4].w = 18;
-  colliders_[4].h = 2;
-
-  colliders_[5].w = 20;
-  colliders_[5].h = 6;
-
-  colliders_[6].w = 18;
-  colliders_[6].h = 2;
-
-  colliders_[7].w = 16;
-  colliders_[7].h = 2;
-
-  colliders_[8].w = 14;
-  colliders_[8].h = 1;
-
-  colliders_[9].w = 10;
-  colliders_[9].h = 1;
-
-  colliders_[10].w = 6;
-  colliders_[10].h = 1;
-
+  collider_.r = DOT_WIDTH / 2;
   shiftColliders();
 }
 void Dot::handleEvent(SDL_Event& e) {
@@ -282,12 +255,12 @@ void Dot::handleEvent(SDL_Event& e) {
     }
   }
 }
-void Dot::move(std::vector<SDL_FRect>& otherColliders) {
+void Dot::move(SDL_FRect& square, Circle& circle) {
   posX_ += velX_;
   shiftColliders();
 
   if (posX_ < 0 || posX_ + DOT_WIDTH > SCREEN_WIDTH ||
-      checkCollision(colliders_, otherColliders)) {
+      checkCollision(collider_, square) || checkCollision(collider_, circle)) {
     posX_ -= velX_;
     shiftColliders();
   }
@@ -295,21 +268,19 @@ void Dot::move(std::vector<SDL_FRect>& otherColliders) {
   posY_ += velY_;
   shiftColliders();
   if (posY_ < 0 || posY_ + DOT_HEIGHT > SCREEN_HEIGHT ||
-      checkCollision(colliders_, otherColliders)) {
+      checkCollision(collider_, square) || checkCollision(collider_, circle)) {
     posY_ -= velY_;
     shiftColliders();
   }
 }
-void Dot::render() { dotTexture.render(posX_, posY_); }
-void Dot::shiftColliders() {
-  int r = 0;
-  for (int set = 0; set < colliders_.size(); ++set) {
-    colliders_[set].x = posX_ + (DOT_WIDTH - colliders_[set].w) / 2;
-    colliders_[set].y = posY_ + r;
-    r += colliders_[set].h;
-  }
+void Dot::render() {
+  dotTexture.render(posX_ - collider_.r, posY_ - collider_.r);
 }
-std::vector<SDL_FRect>& Dot::getColliders() { return colliders_; }
+void Dot::shiftColliders() {
+  collider_.x = posX_;
+  collider_.y = posY_;
+}
+Circle& Dot::getCollider() { return collider_; }
 
 bool init() {
   bool success = true;
@@ -324,6 +295,10 @@ bool init() {
       SDL_Log("%s", SDL_GetError());
       success = false;
     } else {
+      if (!SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1")) {
+        printf("Warning: Linear texture filtering not enabled!");
+      }
+
       renderer = SDL_CreateRenderer(
           window, NULL, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
       if (!renderer) {
@@ -373,44 +348,38 @@ void close() {
 
 bool loadMedia() {
   bool success = true;
-  if (!dotTexture.loadFromFile("assets/26_motion/dot.bmp")) {
+  if (!dotTexture.loadFromFile(
+          "assets/29_circular_collision_detection/dot.bmp")) {
     success = false;
   }
   return success;
 }
 
-bool checkCollision(std::vector<SDL_FRect>& a, std::vector<SDL_FRect>& b) {
-  int leftA, leftB;
-  int rightA, rightB;
-  int topA, topB;
-  int bottomA, bottomB;
-
-  // Go through the A boxes
-  for (int aBox = 0; aBox < a.size(); aBox++) {
-    // Calculate the sides of rect A
-    leftA = a[aBox].x;
-    rightA = a[aBox].x + a[aBox].w;
-    topA = a[aBox].y;
-    bottomA = a[aBox].y + a[aBox].h;
-
-    // Go through the B boxes
-    for (int Bbox = 0; Bbox < b.size(); Bbox++) {
-      // Calculate the sides of rect B
-      leftB = b[Bbox].x;
-      rightB = b[Bbox].x + b[Bbox].w;
-      topB = b[Bbox].y;
-      bottomB = b[Bbox].y + b[Bbox].h;
-
-      // If no sides from A are outside of B
-      if (((bottomA <= topB) || (topA >= bottomB) || (rightA <= leftB) ||
-           (leftA >= rightB)) == false) {
-        // A collision is detected
-        return true;
-      }
-    }
+double distanceSquared(int x1, int y1, int x2, int y2) {
+  return (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2);
+}
+bool checkCollision(Circle& a, Circle& b) {
+  return distanceSquared(a.x, a.y, b.x, b.y) < (a.r + b.r) * (a.r + b.r);
+}
+bool checkCollision(Circle& a, SDL_FRect& b) {
+  int cX, cY;
+  if (a.x < b.x) {
+    cX = b.x;
+  } else if (a.x > b.x + b.w) {
+    cX = b.x + b.w;
+  } else {
+    cX = a.x;
   }
 
-  return false;
+  if (a.y < b.y) {
+    cY = b.y;
+  } else if (a.y > b.y + b.h) {
+    cY = b.y + b.h;
+  } else {
+    cY = a.y;
+  }
+
+  return distanceSquared(a.x, a.y, cX, cY) < a.r * a.r;
 }
 
 void gameLoop() {
@@ -431,10 +400,13 @@ void gameLoop() {
       dot.handleEvent(event);
     }
 
-    dot.move(otherDot.getColliders());
+    dot.move(wall, otherDot.getCollider());
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
+
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderRect(renderer, &wall);
 
     dot.render();
     otherDot.render();
