@@ -5,15 +5,19 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <sstream>
 #include <string>
 
 #include "SDL_error.h"
 #include "SDL_events.h"
 #include "SDL_init.h"
 #include "SDL_keyboard.h"
+#include "SDL_keycode.h"
 #include "SDL_log.h"
+#include "SDL_pixels.h"
 #include "SDL_render.h"
 #include "SDL_scancode.h"
+#include "SDL_timer.h"
 
 constexpr int SCREEN_WIDTH = 640;
 constexpr int SCREEN_HEIGHT = 480;
@@ -176,42 +180,17 @@ void close() {
 
 bool loadMedia() {
   bool success = true;
-
-  if (!promptTexture.loadFromFile(
-          "assets/21_sound_effects_and_music/prompt.png")) {
+  font = TTF_OpenFont("assets/22_timing/lazy.ttf", 28);
+  if (font == NULL) {
+    SDL_Log("%s", TTF_GetError());
     success = false;
+  } else {
+    SDL_Color textColor{0, 0, 0, 255};
+    if (!promptTexture.loadFromRenderedText("Press Enter to Reset Start Time.",
+                                            textColor)) {
+      success = false;
+    }
   }
-
-  music = Mix_LoadMUS("assets/21_sound_effects_and_music/beat.wav");
-  if (music == NULL) {
-    SDL_Log("%s", Mix_GetError());
-    success = false;
-  }
-
-  scratch = Mix_LoadWAV("assets/21_sound_effects_and_music/scratch.wav");
-  if (scratch == NULL) {
-    SDL_Log("%s", Mix_GetError());
-    success = false;
-  }
-
-  high = Mix_LoadWAV("assets/21_sound_effects_and_music/high.wav");
-  if (high == NULL) {
-    SDL_Log("%s", Mix_GetError());
-    success = false;
-  }
-
-  medium = Mix_LoadWAV("assets/21_sound_effects_and_music/medium.wav");
-  if (medium == NULL) {
-    SDL_Log("%s", Mix_GetError());
-    success = false;
-  }
-
-  low = Mix_LoadWAV("assets/21_sound_effects_and_music/low.wav");
-  if (low == NULL) {
-    SDL_Log("%s", Mix_GetError());
-    success = false;
-  }
-
   return success;
 }
 
@@ -219,53 +198,32 @@ void gameLoop() {
   SDL_Event event;
 
   bool quit = false;
+  SDL_Color textColor{0, 0, 0, 255};
+  uint32_t startTime = 0;
+  std::stringstream timeText;
 
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
-      } else if (event.type == SDL_EVENT_KEY_DOWN) {
-        switch (event.key.keysym.sym) {
-          case SDLK_1:
-            Mix_PlayChannel(-1, high, 0);
-            break;
-
-          case SDLK_2:
-            Mix_PlayChannel(-1, medium, 0);
-            break;
-
-          case SDLK_3:
-            Mix_PlayChannel(-1, low, 0);
-            break;
-
-          case SDLK_4:
-            Mix_PlayChannel(-1, scratch, 0);
-            break;
-
-          case SDLK_9:
-            if (!Mix_PlayingMusic()) {
-              Mix_PlayMusic(music, -1);
-            } else {
-              if (Mix_PausedMusic()) {
-                Mix_ResumeMusic();
-              } else {
-                Mix_PauseMusic();
-              }
-            }
-            break;
-
-          case SDLK_0:
-            Mix_HaltMusic();
-            break;
-        }
+      } else if (event.type == SDL_EVENT_KEY_DOWN &&
+                 event.key.keysym.sym == SDLK_RETURN) {
+        startTime = SDL_GetTicks();
       }
     }
+
+    timeText.str("");
+    timeText << "Milliseconds since start time: " << SDL_GetTicks() - startTime;
+    LTexture timeTexture;
+    timeTexture.loadFromRenderedText(timeText.str(), textColor);
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
 
-    promptTexture.render(0, 0);
+    promptTexture.render((SCREEN_WIDTH - promptTexture.getWidth()) / 2, 0);
+    timeTexture.render((SCREEN_WIDTH - timeTexture.getWidth()) / 2,
+                       (SCREEN_HEIGHT - promptTexture.getHeight()) / 2);
 
     SDL_RenderPresent(renderer);
 
