@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "SDL_blendmode.h"
+#include "SDL_clipboard.h"
 #include "SDL_error.h"
 #include "SDL_events.h"
 #include "SDL_init.h"
@@ -110,6 +111,7 @@ SDL_Renderer* renderer = NULL;
 TTF_Font* font = NULL;
 
 LTexture dotTexture;
+LTexture inputTextTexture;
 LTexture bgTexture;
 SDL_AudioSpec spec;
 
@@ -148,11 +150,11 @@ bool LTexture::loadFromRenderedText(std::string textureText,
   free();
   auto textSurface = TTF_RenderText_Solid(font, textureText.c_str(), textColor);
   if (textSurface == NULL) {
-    SDL_Log("%s", TTF_GetError());
+    SDL_Log("Could not load text surface: %s", TTF_GetError());
   } else {
     texture_ = SDL_CreateTextureFromSurface(renderer, textSurface);
     if (texture_ == NULL) {
-      SDL_Log("%s", SDL_GetError());
+      SDL_Log("Could not create texture from surface: %s", SDL_GetError());
     } else {
       width_ = textSurface->w;
       height_ = textSurface->h;
@@ -334,12 +336,13 @@ void close() {
 
 bool loadMedia() {
   bool success = true;
-  if (!dotTexture.loadFromFile("assets/30_scrolling/dot.bmp")) {
+
+  font = TTF_OpenFont("assets/16_true_type_fonts/lazy.ttf", 28);
+  if (font == NULL) {
+    SDL_Log("%s", TTF_GetError());
     success = false;
   }
-  if (!bgTexture.loadFromFile("assets/30_scrolling/bg.png")) {
-    success = false;
-  }
+
   return success;
 }
 
@@ -374,29 +377,49 @@ void gameLoop() {
   SDL_Event event;
 
   bool quit = false;
-  Dot dot(0, 0);
-  int scrollingOffset = 0;
+
+  bool renderText = false;
+  SDL_Color textColor{0, 0, 0, 255};
+  std::string inputText = "Some Text";
+  inputTextTexture.loadFromRenderedText(inputText.c_str(), textColor);
+  SDL_StartTextInput();
 
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
+      } else if (event.type == SDL_EVENT_KEY_DOWN) {
+        if (event.key.keysym.sym == SDLK_BACKSPACE && !inputText.empty()) {
+          inputText.pop_back();
+          renderText = true;
+        } else if (event.key.keysym.sym == SDLK_c &&
+                   SDL_GetModState() & SDL_KMOD_CTRL) {
+          SDL_SetClipboardText(inputText.c_str());
+        } else if (event.key.keysym.sym == SDLK_v &&
+                   SDL_GetModState() & SDL_KMOD_CTRL) {
+          inputText = SDL_GetClipboardText();
+          renderText = true;
+        }
+      } else if (event.type == SDL_EVENT_TEXT_INPUT) {
+        if (!(SDL_GetModState() & SDL_KMOD_CTRL &&
+              (event.text.text[0] == 'c' || event.text.text[0] == 'C' ||
+               event.text.text[0] == 'v' || event.text.text[0] == 'V'))) {
+          inputText += event.text.text;
+          renderText = true;
+        }
       }
-      dot.handleEvent(event);
     }
 
-    dot.move();
-    scrollingOffset -= 10;
-    if (scrollingOffset < -bgTexture.getWidth()) {
-      scrollingOffset = 0;
+    if (renderText) {
+      inputTextTexture.loadFromRenderedText(
+          inputText.empty() ? " " : inputText.c_str(), textColor);
     }
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
 
-    bgTexture.render(scrollingOffset, 0);
-    bgTexture.render(scrollingOffset + bgTexture.getWidth(), 0);
+    inputTextTexture.render(0, 0);
 
     SDL_RenderPresent(renderer);
 
