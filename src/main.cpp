@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "SDL_blendmode.h"
 #include "SDL_error.h"
@@ -25,30 +26,7 @@ bool init();
 void close();
 bool loadMedia();
 void gameLoop();
-
-bool checkCollision(SDL_FRect a, SDL_FRect b) {
-  int leftA, leftB;
-  int rightA, rightB;
-  int topA, topB;
-  int bottomA, bottomB;
-
-  leftA = a.x;
-  rightA = a.x + a.w;
-  topA = a.y;
-  bottomA = a.y + a.h;
-
-  leftB = b.x;
-  rightB = b.x + b.w;
-  topB = b.y;
-  bottomB = b.y + b.h;
-
-  if (bottomA <= topB || bottomB <= topA || rightA <= leftB ||
-      rightB <= leftA) {
-    return false;
-  }
-
-  return true;
-}
+bool checkCollision(std::vector<SDL_FRect>& a, std::vector<SDL_FRect>& b);
 
 class LTexture {
  public:
@@ -97,12 +75,13 @@ class Dot {
  public:
   static constexpr int DOT_WIDTH = 20;
   static constexpr int DOT_HEIGHT = 20;
-  static constexpr int DOT_VEL = 10;
+  static constexpr int DOT_VEL = 1;
 
-  Dot();
+  Dot(int x, int y);
   void handleEvent(SDL_Event& e);
-  void move(SDL_FRect& wall);
+  void move(std::vector<SDL_FRect>& otherColliders);
   void render();
+  std::vector<SDL_FRect>& getColliders();
 
  private:
   int posX_;
@@ -110,7 +89,8 @@ class Dot {
   int velX_;
   int velY_;
 
-  SDL_FRect collider_;
+  std::vector<SDL_FRect> colliders_;
+  void shiftColliders();
 };
 
 constexpr int SCREEN_WIDTH = 640;
@@ -231,9 +211,43 @@ uint32_t LTimer::getTicks() {
 bool LTimer::isStarted() { return started_; }
 bool LTimer::isPaused() { return paused_; }
 
-Dot::Dot() : posX_(0), posY_(0), velX_(0), velY_(0) {
-  collider_.w = DOT_WIDTH;
-  collider_.h = DOT_HEIGHT;
+Dot::Dot(int x, int y) : posX_(x), posY_(y), velX_(0), velY_(0) {
+  colliders_.resize(11);
+
+  colliders_[0].w = 6;
+  colliders_[0].h = 1;
+
+  colliders_[1].w = 10;
+  colliders_[1].h = 1;
+
+  colliders_[2].w = 14;
+  colliders_[2].h = 1;
+
+  colliders_[3].w = 16;
+  colliders_[3].h = 2;
+
+  colliders_[4].w = 18;
+  colliders_[4].h = 2;
+
+  colliders_[5].w = 20;
+  colliders_[5].h = 6;
+
+  colliders_[6].w = 18;
+  colliders_[6].h = 2;
+
+  colliders_[7].w = 16;
+  colliders_[7].h = 2;
+
+  colliders_[8].w = 14;
+  colliders_[8].h = 1;
+
+  colliders_[9].w = 10;
+  colliders_[9].h = 1;
+
+  colliders_[10].w = 6;
+  colliders_[10].h = 1;
+
+  shiftColliders();
 }
 void Dot::handleEvent(SDL_Event& e) {
   if (e.type == SDL_EVENT_KEY_DOWN && e.key.repeat == 0) {
@@ -268,24 +282,34 @@ void Dot::handleEvent(SDL_Event& e) {
     }
   }
 }
-void Dot::move(SDL_FRect& wall) {
+void Dot::move(std::vector<SDL_FRect>& otherColliders) {
   posX_ += velX_;
-  collider_.x = posX_;
+  shiftColliders();
+
   if (posX_ < 0 || posX_ + DOT_WIDTH > SCREEN_WIDTH ||
-      checkCollision(collider_, wall)) {
+      checkCollision(colliders_, otherColliders)) {
     posX_ -= velX_;
-    collider_.x = posX_;
+    shiftColliders();
   }
 
   posY_ += velY_;
-  collider_.y = posY_;
+  shiftColliders();
   if (posY_ < 0 || posY_ + DOT_HEIGHT > SCREEN_HEIGHT ||
-      checkCollision(collider_, wall)) {
+      checkCollision(colliders_, otherColliders)) {
     posY_ -= velY_;
-    collider_.y = posY_;
+    shiftColliders();
   }
 }
 void Dot::render() { dotTexture.render(posX_, posY_); }
+void Dot::shiftColliders() {
+  int r = 0;
+  for (int set = 0; set < colliders_.size(); ++set) {
+    colliders_[set].x = posX_ + (DOT_WIDTH - colliders_[set].w) / 2;
+    colliders_[set].y = posY_ + r;
+    r += colliders_[set].h;
+  }
+}
+std::vector<SDL_FRect>& Dot::getColliders() { return colliders_; }
 
 bool init() {
   bool success = true;
@@ -355,11 +379,46 @@ bool loadMedia() {
   return success;
 }
 
+bool checkCollision(std::vector<SDL_FRect>& a, std::vector<SDL_FRect>& b) {
+  int leftA, leftB;
+  int rightA, rightB;
+  int topA, topB;
+  int bottomA, bottomB;
+
+  // Go through the A boxes
+  for (int aBox = 0; aBox < a.size(); aBox++) {
+    // Calculate the sides of rect A
+    leftA = a[aBox].x;
+    rightA = a[aBox].x + a[aBox].w;
+    topA = a[aBox].y;
+    bottomA = a[aBox].y + a[aBox].h;
+
+    // Go through the B boxes
+    for (int Bbox = 0; Bbox < b.size(); Bbox++) {
+      // Calculate the sides of rect B
+      leftB = b[Bbox].x;
+      rightB = b[Bbox].x + b[Bbox].w;
+      topB = b[Bbox].y;
+      bottomB = b[Bbox].y + b[Bbox].h;
+
+      // If no sides from A are outside of B
+      if (((bottomA <= topB) || (topA >= bottomB) || (rightA <= leftB) ||
+           (leftA >= rightB)) == false) {
+        // A collision is detected
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 void gameLoop() {
   SDL_Event event;
 
   bool quit = false;
-  Dot dot;
+  Dot dot(0, 0);
+  Dot otherDot(SCREEN_WIDTH / 4, SCREEN_HEIGHT / 4);
 
   SDL_FRect wall{300, 40, 40, 400};
 
@@ -372,15 +431,13 @@ void gameLoop() {
       dot.handleEvent(event);
     }
 
-    dot.move(wall);
+    dot.move(otherDot.getColliders());
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
 
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderRect(renderer, &wall);
-
     dot.render();
+    otherDot.render();
 
     SDL_RenderPresent(renderer);
 
