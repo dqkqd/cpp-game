@@ -242,35 +242,26 @@ void gameLoop() {
   SDL_Color textColor{0, 0, 0, 255};
   uint32_t startTime = 0;
   std::stringstream timeText;
-  LTimer timer;
+  LTimer fpsTimer;
+
+  int countedFrames = 0;
+  fpsTimer.start();
 
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
-      } else if (event.type == SDL_EVENT_KEY_DOWN) {
-        switch (event.key.keysym.sym) {
-          case SDLK_s:
-            if (timer.isStarted()) {
-              timer.stop();
-            } else {
-              timer.start();
-            }
-            break;
-          case SDLK_p:
-            if (timer.isPaused()) {
-              timer.unpause();
-            } else {
-              timer.pause();
-            }
-            break;
-        }
       }
     }
 
+    float avgFps = countedFrames / (fpsTimer.getTicks() / 1000.f);
+    if (avgFps > 2'000'000) {
+      avgFps = 0;
+    }
+
     timeText.str("");
-    timeText << "Milliseconds since start time: " << timer.getTicks();
+    timeText << "Average Frames per second: " << avgFps;
 
     LTexture timeTexture;
     timeTexture.loadFromRenderedText(timeText.str(), textColor);
@@ -282,6 +273,7 @@ void gameLoop() {
                        (SCREEN_HEIGHT - timeTexture.getHeight()) / 2);
 
     SDL_RenderPresent(renderer);
+    ++countedFrames;
 
     if (quit) {
       break;
