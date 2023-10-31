@@ -18,6 +18,7 @@
 #include "SDL_keyboard.h"
 #include "SDL_keycode.h"
 #include "SDL_log.h"
+#include "SDL_oldnames.h"
 #include "SDL_pixels.h"
 #include "SDL_rect.h"
 #include "SDL_render.h"
@@ -131,6 +132,7 @@ class LWindow {
   SDL_Window* window_;
   SDL_Renderer* renderer_;
   int windowId_;
+  int windowDisplayId_;
 
   int width_;
   int height_;
@@ -150,8 +152,10 @@ constexpr int TOTAL_DATA = 100;
 constexpr int SCREEN_FPS = 60;
 constexpr int SCREEN_TICKS_PER_FRAME = 1000 / SCREEN_FPS;
 
-constexpr int TOTAL_WINDOWS = 3;
-LWindow windows[TOTAL_WINDOWS];
+LWindow window;
+int totalDisplays;
+SDL_DisplayID* displays;
+SDL_Rect* displayBounds = NULL;
 
 SDL_Renderer* renderer;
 LTexture screenTexture;
@@ -326,7 +330,7 @@ LWindow::LWindow()
 
 bool LWindow::init() {
   window_ = SDL_CreateWindow("Hello SDL", SCREEN_WIDTH, SCREEN_HEIGHT,
-                             SDL_WINDOW_OPENGL);
+                             SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
   if (window_) {
     mouseFocus_ = true;
     keyboardFocus_ = true;
@@ -334,6 +338,7 @@ bool LWindow::init() {
     height_ = SCREEN_HEIGHT;
 
     windowId_ = SDL_GetWindowID(window_);
+    windowDisplayId_ = SDL_GetDisplayForWindow(window_);
     shown_ = true;
 
     renderer_ = SDL_CreateRenderer(
@@ -350,6 +355,10 @@ void LWindow::handleEvent(SDL_Event& e) {
       e.window.windowID == windowId_) {
     bool updateCaption = false;
     switch (e.window.type) {
+      case SDL_EVENT_WINDOW_MOVED:
+        windowDisplayId_ = SDL_GetDisplayForWindow(window_);
+        updateCaption = true;
+        break;
       case SDL_EVENT_WINDOW_SHOWN:
         shown_ = true;
         break;
@@ -399,14 +408,34 @@ void LWindow::handleEvent(SDL_Event& e) {
               << " KeyboardFocus:" << ((keyboardFocus_) ? "On" : "Off");
       SDL_SetWindowTitle(window_, caption.str().c_str());
     }
-  } else if ((e.type = SDL_EVENT_KEY_DOWN && e.key.keysym.sym == SDLK_RETURN)) {
-    if (fullScreen_) {
-      SDL_SetWindowFullscreen(window_, SDL_FALSE);
-      fullScreen_ = false;
-    } else {
-      SDL_SetWindowFullscreen(window_, SDL_TRUE);
-      fullScreen_ = true;
-      minimized_ = false;
+  } else if ((e.type = SDL_EVENT_KEY_DOWN)) {
+    bool switchDisplay = false;
+    switch (e.key.keysym.sym) {
+      case SDLK_UP:
+        ++windowDisplayId_;
+        switchDisplay = true;
+        break;
+      case SDLK_DOWN:
+        --windowDisplayId_;
+        switchDisplay = true;
+        break;
+    }
+    if (switchDisplay) {
+      if (windowDisplayId_ < 1) {
+        printf("-\n");
+        windowDisplayId_ = totalDisplays;
+      } else if (windowDisplayId_ >= totalDisplays + 1) {
+        printf("+\n");
+        windowDisplayId_ = 1;
+      }
+
+      windowDisplayId_ = 1;
+      printf("Switch %d\n", windowDisplayId_);
+      for (int i = 0; i < totalDisplays; ++i) {
+        printf("%d %d %d %d\n", displayBounds[i].x, displayBounds[i].y,
+               displayBounds[i].w, displayBounds[i].h);
+      }
+      SDL_SetWindowPosition(window_, 0, 0);
     }
   }
 }
@@ -438,12 +467,23 @@ bool init() {
     SDL_Log("SDL_Init failed (%s)", SDL_GetError());
     success = false;
   } else {
-    if (!windows[0].init()) {
+    if (!window.init()) {
       SDL_Log("Could not init window %s", SDL_GetError());
       success = false;
     } else {
       if (!SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1")) {
         printf("Warning: Linear texture filtering not enabled!");
+      }
+
+      displays = SDL_GetDisplays(&totalDisplays);
+      if (totalDisplays < 2) {
+        printf("Only one displays connected\n");
+        success = false;
+      }
+
+      displayBounds = new SDL_Rect[totalDisplays];
+      for (int i = 0; i < totalDisplays; ++i) {
+        SDL_GetDisplayBounds(displays[i], &displayBounds[i]);
       }
     }
   }
@@ -459,9 +499,7 @@ void close() {
   TTF_CloseFont(font);
   SDL_DestroyRenderer(renderer);
 
-  for (int i = 0; i < TOTAL_WINDOWS; ++i) {
-    windows[i].free();
-  }
+  window.free();
 
   Mix_Quit();
   TTF_Quit();
@@ -506,49 +544,16 @@ void gameLoop() {
 
   bool quit = false;
 
-  for (int i = 1; i < TOTAL_WINDOWS; ++i) {
-    windows[i].init();
-  }
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
       }
-      for (int i = 0; i < TOTAL_WINDOWS; ++i) {
-        windows[i].handleEvent(event);
-      }
-
-      if (event.type == SDL_EVENT_KEY_DOWN) {
-        switch (event.key.keysym.sym) {
-          case SDLK_1:
-            windows[0].focus();
-            break;
-          case SDLK_2:
-            windows[1].focus();
-            break;
-          case SDLK_3:
-            windows[2].focus();
-            break;
-        }
-      }
+      window.handleEvent(event);
     }
 
-    for (int i = 0; i < TOTAL_WINDOWS; ++i) {
-      windows[i].render();
-    }
-
-    bool allWindowsClosed = true;
-    for (int i = 0; i < TOTAL_WINDOWS; ++i) {
-      if (windows[i].isShown()) {
-        allWindowsClosed = false;
-        break;
-      }
-    }
-
-    if (allWindowsClosed) {
-      quit = true;
-    }
+    window.render();
 
     if (quit) {
       break;
