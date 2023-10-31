@@ -25,6 +25,7 @@
 #include "SDL_scancode.h"
 #include "SDL_stdinc.h"
 #include "SDL_timer.h"
+#include "SDL_video.h"
 
 struct Circle {
   int x, y;
@@ -107,6 +108,30 @@ class Dot {
   int velY_;
 };
 
+class LWindow {
+ public:
+  LWindow();
+  bool init();
+  SDL_Renderer* createRenderer();
+  void handleEvent(SDL_Event& e);
+  void free();
+  int getWidth();
+  int getHeight();
+
+  bool hasMouseFocus();
+  bool hasKeyboardFocus();
+  bool isMinimized();
+
+ private:
+  SDL_Window* window_;
+  int width_;
+  int height_;
+  bool mouseFocus_;
+  bool keyboardFocus_;
+  bool fullScreen_;
+  bool minimized_;
+};
+
 constexpr int LEVEL_WIDTH = 1280;
 constexpr int LEVEL_HEIGHT = 960;
 constexpr int SCREEN_WIDTH = 640;
@@ -115,19 +140,13 @@ constexpr int TOTAL_DATA = 100;
 constexpr int SCREEN_FPS = 60;
 constexpr int SCREEN_TICKS_PER_FRAME = 1000 / SCREEN_FPS;
 
-SDL_Window* window = NULL;
-SDL_Renderer* renderer = NULL;
+LWindow window;
+SDL_Renderer* renderer;
+LTexture screenTexture;
+
 TTF_Font* font = NULL;
 
-SDL_AudioStream* streamIn;
-SDL_AudioStream* streamOut;
-SDL_AudioSpec inSpec{SDL_AUDIO_F32, 2, 44100};
-SDL_AudioSpec outSpec{SDL_AUDIO_F32, 2, 44100};
-
 LTexture promptTexture;
-LTexture deviceTextures[MAX_RECORDING_DEVICES];
-
-int recordingDeviceCount = 0;
 
 LTexture::~LTexture() { free(); }
 void LTexture::free() {
@@ -284,6 +303,94 @@ void Dot::render() { promptTexture.render(posX_, posY_); }
 int Dot::getPosX() { return posX_; }
 int Dot::getPosY() { return posY_; }
 
+LWindow::LWindow()
+    : window_(NULL),
+      mouseFocus_(false),
+      keyboardFocus_(false),
+      fullScreen_(false),
+      minimized_(false),
+      width_(0),
+      height_(0) {}
+
+bool LWindow::init() {
+  window_ = SDL_CreateWindow("Hello SDL", SCREEN_WIDTH, SCREEN_HEIGHT,
+                             SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+  if (window_) {
+    mouseFocus_ = true;
+    keyboardFocus_ = true;
+    width_ = SCREEN_WIDTH;
+    height_ = SCREEN_HEIGHT;
+  }
+  return window_ != NULL;
+}
+
+SDL_Renderer* LWindow::createRenderer() {
+  return SDL_CreateRenderer(
+      window_, NULL, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+}
+
+void LWindow::handleEvent(SDL_Event& e) {
+  if (e.type >= SDL_EVENT_WINDOW_FIRST && e.type <= SDL_EVENT_WINDOW_LAST) {
+    bool updateCaption = false;
+    switch (e.window.type) {
+      case SDL_EVENT_WINDOW_RESIZED:
+        width_ = e.window.data1;
+        height_ = e.window.data2;
+        SDL_RenderPresent(renderer);
+        break;
+      case SDL_EVENT_WINDOW_EXPOSED:
+        SDL_RenderPresent(renderer);
+        break;
+      case SDL_EVENT_WINDOW_MOUSE_ENTER:
+        mouseFocus_ = true;
+        updateCaption = true;
+        break;
+      case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+        mouseFocus_ = false;
+        updateCaption = true;
+        break;
+      case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        keyboardFocus_ = true;
+        updateCaption = true;
+        break;
+      case SDL_EVENT_WINDOW_FOCUS_LOST:
+        keyboardFocus_ = false;
+        updateCaption = true;
+        break;
+      case SDL_EVENT_WINDOW_MINIMIZED:
+        minimized_ = true;
+        break;
+      case SDL_EVENT_WINDOW_MAXIMIZED:
+        minimized_ = false;
+        break;
+      case SDL_EVENT_WINDOW_RESTORED:
+        minimized_ = false;
+        break;
+    }
+    if (updateCaption) {
+      std::stringstream caption;
+      caption << "Hello SDL - MouseFocus:" << ((mouseFocus_) ? "On" : "Off")
+              << " KeyboardFocus:" << ((keyboardFocus_) ? "On" : "Off");
+      SDL_SetWindowTitle(window_, caption.str().c_str());
+    }
+  } else if ((e.type = SDL_EVENT_KEY_DOWN && e.key.keysym.sym == SDLK_RETURN)) {
+    if (fullScreen_) {
+      SDL_SetWindowFullscreen(window_, SDL_FALSE);
+      fullScreen_ = false;
+    } else {
+      SDL_SetWindowFullscreen(window_, SDL_TRUE);
+      fullScreen_ = true;
+      minimized_ = false;
+    }
+  }
+}
+int LWindow::getWidth() { return width_; }
+int LWindow::getHeight() { return height_; }
+bool LWindow::hasMouseFocus() { return mouseFocus_; }
+bool LWindow::hasKeyboardFocus() { return keyboardFocus_; }
+bool LWindow::isMinimized() { return minimized_; }
+void LWindow::free() { SDL_DestroyWindow(window_); }
+
 bool init() {
   bool success = true;
 
@@ -291,9 +398,7 @@ bool init() {
     SDL_Log("SDL_Init failed (%s)", SDL_GetError());
     success = false;
   } else {
-    window = SDL_CreateWindow("Hello SDL", SCREEN_WIDTH, SCREEN_HEIGHT,
-                              SDL_WINDOW_OPENGL);
-    if (!window) {
+    if (!window.init()) {
       SDL_Log("%s", SDL_GetError());
       success = false;
     } else {
@@ -301,8 +406,7 @@ bool init() {
         printf("Warning: Linear texture filtering not enabled!");
       }
 
-      renderer = SDL_CreateRenderer(
-          window, NULL, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+      renderer = window.createRenderer();
       if (!renderer) {
         SDL_Log("%s", SDL_GetError());
         success = false;
@@ -331,9 +435,6 @@ void close() {
 
   TTF_CloseFont(font);
   SDL_DestroyRenderer(renderer);
-  SDL_DestroyWindow(window);
-  SDL_DestroyAudioStream(streamIn);
-  SDL_DestroyAudioStream(streamOut);
 
   Mix_Quit();
   TTF_Quit();
@@ -354,19 +455,6 @@ bool loadMedia() {
                                        textColor);
   }
 
-  streamIn = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_CAPTURE,
-                                       &inSpec, NULL, NULL);
-  if (!streamIn) {
-    SDL_Log("%s", SDL_GetError());
-    success = false;
-  }
-
-  streamOut = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_OUTPUT,
-                                        &inSpec, NULL, NULL);
-  if (!streamOut) {
-    SDL_Log("%s", SDL_GetError());
-    success = false;
-  }
   return success;
 }
 
@@ -414,35 +502,21 @@ void gameLoop() {
         quit = true;
         break;
       }
-
-      if (event.type == SDL_EVENT_KEY_DOWN && event.key.keysym.sym == SDLK_1) {
-        promptTexture.loadFromRenderedText("Recording...", textColor);
-        SDL_PauseAudioDevice(SDL_GetAudioStreamDevice(streamOut));
-        SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(streamIn));
-      } else if (event.type == SDL_EVENT_KEY_DOWN &&
-                 event.key.keysym.sym == SDLK_2) {
-        promptTexture.loadFromRenderedText("Playing...", textColor);
-        SDL_PauseAudioDevice(SDL_GetAudioStreamDevice(streamIn));
-        SDL_FlushAudioStream(streamIn);
-        SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(streamOut));
-      }
+      window.handleEvent(event);
     }
+    if (!window.isMinimized()) {
+      // Clear screen
+      SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
+      SDL_RenderClear(renderer);
 
-    // recording
-    while (SDL_GetAudioStreamAvailable(streamIn) > 0) {
-      Uint8 buf[1024];
-      const int br = SDL_GetAudioStreamData(streamIn, buf, sizeof(buf));
-      if (br < 0) {
-        SDL_Log("%s", SDL_GetError());
-      } else if (SDL_PutAudioStreamData(streamOut, buf, br) < 0) {
-        SDL_Log("%s", SDL_GetError());
-      }
+      // Render text textures
+      screenTexture.render(
+          (window.getWidth() - screenTexture.getWidth()) / 2,
+          (window.getHeight() - screenTexture.getHeight()) / 2);
+
+      // Update screen
+      SDL_RenderPresent(renderer);
     }
-
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderClear(renderer);
-    promptTexture.render(0, 0);
-    SDL_RenderPresent(renderer);
 
     if (quit) {
       break;
