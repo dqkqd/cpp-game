@@ -114,22 +114,32 @@ class LWindow {
   bool init();
   SDL_Renderer* createRenderer();
   void handleEvent(SDL_Event& e);
+
+  void focus();
+  void render();
   void free();
+
   int getWidth();
   int getHeight();
 
   bool hasMouseFocus();
   bool hasKeyboardFocus();
   bool isMinimized();
+  bool isShown();
 
  private:
   SDL_Window* window_;
+  SDL_Renderer* renderer_;
+  int windowId_;
+
   int width_;
   int height_;
+
   bool mouseFocus_;
   bool keyboardFocus_;
   bool fullScreen_;
   bool minimized_;
+  bool shown_;
 };
 
 constexpr int LEVEL_WIDTH = 1280;
@@ -140,7 +150,9 @@ constexpr int TOTAL_DATA = 100;
 constexpr int SCREEN_FPS = 60;
 constexpr int SCREEN_TICKS_PER_FRAME = 1000 / SCREEN_FPS;
 
-LWindow window;
+constexpr int TOTAL_WINDOWS = 3;
+LWindow windows[TOTAL_WINDOWS];
+
 SDL_Renderer* renderer;
 LTexture screenTexture;
 
@@ -314,25 +326,39 @@ LWindow::LWindow()
 
 bool LWindow::init() {
   window_ = SDL_CreateWindow("Hello SDL", SCREEN_WIDTH, SCREEN_HEIGHT,
-                             SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+                             SDL_WINDOW_OPENGL);
   if (window_) {
     mouseFocus_ = true;
     keyboardFocus_ = true;
     width_ = SCREEN_WIDTH;
     height_ = SCREEN_HEIGHT;
-  }
-  return window_ != NULL;
-}
 
-SDL_Renderer* LWindow::createRenderer() {
-  return SDL_CreateRenderer(
-      window_, NULL, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    windowId_ = SDL_GetWindowID(window_);
+    shown_ = true;
+
+    renderer_ = SDL_CreateRenderer(
+        window_, NULL, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (renderer_) {
+      SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
+    }
+  }
+  return window_ != NULL && renderer_ != NULL;
 }
 
 void LWindow::handleEvent(SDL_Event& e) {
-  if (e.type >= SDL_EVENT_WINDOW_FIRST && e.type <= SDL_EVENT_WINDOW_LAST) {
+  if (e.type >= SDL_EVENT_WINDOW_FIRST && e.type <= SDL_EVENT_WINDOW_LAST &&
+      e.window.windowID == windowId_) {
     bool updateCaption = false;
     switch (e.window.type) {
+      case SDL_EVENT_WINDOW_SHOWN:
+        shown_ = true;
+        break;
+      case SDL_EVENT_WINDOW_HIDDEN:
+        shown_ = false;
+        break;
+      case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+        SDL_HideWindow(window_);
+        break;
       case SDL_EVENT_WINDOW_RESIZED:
         width_ = e.window.data1;
         height_ = e.window.data2;
@@ -384,11 +410,25 @@ void LWindow::handleEvent(SDL_Event& e) {
     }
   }
 }
+void LWindow::focus() {
+  if (!shown_) {
+    SDL_ShowWindow(window_);
+  }
+  SDL_RaiseWindow(window_);
+}
+void LWindow::render() {
+  if (!minimized_) {
+    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
+    SDL_RenderClear(renderer_);
+    SDL_RenderPresent(renderer_);
+  }
+}
 int LWindow::getWidth() { return width_; }
 int LWindow::getHeight() { return height_; }
 bool LWindow::hasMouseFocus() { return mouseFocus_; }
 bool LWindow::hasKeyboardFocus() { return keyboardFocus_; }
 bool LWindow::isMinimized() { return minimized_; }
+bool LWindow::isShown() { return shown_; }
 void LWindow::free() { SDL_DestroyWindow(window_); }
 
 bool init() {
@@ -398,29 +438,12 @@ bool init() {
     SDL_Log("SDL_Init failed (%s)", SDL_GetError());
     success = false;
   } else {
-    if (!window.init()) {
-      SDL_Log("%s", SDL_GetError());
+    if (!windows[0].init()) {
+      SDL_Log("Could not init window %s", SDL_GetError());
       success = false;
     } else {
       if (!SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1")) {
         printf("Warning: Linear texture filtering not enabled!");
-      }
-
-      renderer = window.createRenderer();
-      if (!renderer) {
-        SDL_Log("%s", SDL_GetError());
-        success = false;
-      } else {
-        int imgFlags = IMG_INIT_PNG;
-        if (!(IMG_Init(imgFlags) & imgFlags)) {
-          SDL_Log("%s ", IMG_GetError());
-          success = false;
-        }
-
-        if (TTF_Init() < 0) {
-          SDL_Log("Couldn't init ttf %s", TTF_GetError());
-          success = false;
-        }
       }
     }
   }
@@ -436,6 +459,10 @@ void close() {
   TTF_CloseFont(font);
   SDL_DestroyRenderer(renderer);
 
+  for (int i = 0; i < TOTAL_WINDOWS; ++i) {
+    windows[i].free();
+  }
+
   Mix_Quit();
   TTF_Quit();
   IMG_Quit();
@@ -444,17 +471,6 @@ void close() {
 
 bool loadMedia() {
   bool success = true;
-
-  font = TTF_OpenFont("assets/16_true_type_fonts/lazy.ttf", 15);
-  if (font == NULL) {
-    SDL_Log("%s", TTF_GetError());
-    success = false;
-  } else {
-    SDL_Color textColor{0, 0, 0, 255};
-    promptTexture.loadFromRenderedText("Press 1 to start record !!!",
-                                       textColor);
-  }
-
   return success;
 }
 
@@ -490,32 +506,48 @@ void gameLoop() {
 
   bool quit = false;
 
-  bool renderText = false;
-
-  auto currentState = RecordingState::STOPPED;
-
-  SDL_Color textColor{0, 0, 0, 255};
-
+  for (int i = 1; i < TOTAL_WINDOWS; ++i) {
+    windows[i].init();
+  }
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
       }
-      window.handleEvent(event);
+      for (int i = 0; i < TOTAL_WINDOWS; ++i) {
+        windows[i].handleEvent(event);
+      }
+
+      if (event.type == SDL_EVENT_KEY_DOWN) {
+        switch (event.key.keysym.sym) {
+          case SDLK_1:
+            windows[0].focus();
+            break;
+          case SDLK_2:
+            windows[1].focus();
+            break;
+          case SDLK_3:
+            windows[2].focus();
+            break;
+        }
+      }
     }
-    if (!window.isMinimized()) {
-      // Clear screen
-      SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 0xFF);
-      SDL_RenderClear(renderer);
 
-      // Render text textures
-      screenTexture.render(
-          (window.getWidth() - screenTexture.getWidth()) / 2,
-          (window.getHeight() - screenTexture.getHeight()) / 2);
+    for (int i = 0; i < TOTAL_WINDOWS; ++i) {
+      windows[i].render();
+    }
 
-      // Update screen
-      SDL_RenderPresent(renderer);
+    bool allWindowsClosed = true;
+    for (int i = 0; i < TOTAL_WINDOWS; ++i) {
+      if (windows[i].isShown()) {
+        allWindowsClosed = false;
+        break;
+      }
+    }
+
+    if (allWindowsClosed) {
+      quit = true;
     }
 
     if (quit) {
