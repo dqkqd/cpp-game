@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "SDL_audio.h"
 #include "SDL_blendmode.h"
 #include "SDL_clipboard.h"
 #include "SDL_error.h"
@@ -37,6 +38,11 @@ void gameLoop();
 bool checkCollision(Circle& a, Circle& b);
 bool checkCollision(Circle& a, SDL_FRect& b);
 double distanceSquared(int x1, int y1, int x2, int y2);
+
+constexpr int MAX_RECORDING_DEVICES = 10;
+constexpr int MAX_RECORDING_SECONDS = 5;
+constexpr int RECORDING_BUFFER_SECONDS = MAX_RECORDING_SECONDS + 1;
+enum class RecordingState { STOPPED, RECORDING, PLAYBACK };
 
 class LTexture {
  public:
@@ -113,12 +119,15 @@ SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
 TTF_Font* font = NULL;
 
-Sint32 data[TOTAL_DATA];
+SDL_AudioStream* streamIn;
+SDL_AudioStream* streamOut;
+SDL_AudioSpec inSpec{SDL_AUDIO_F32, 2, 44100};
+SDL_AudioSpec outSpec{SDL_AUDIO_F32, 2, 44100};
 
-LTexture dotTexture;
-LTexture dataTexture[TOTAL_DATA];
-LTexture bgTexture;
-SDL_AudioSpec spec;
+LTexture promptTexture;
+LTexture deviceTextures[MAX_RECORDING_DEVICES];
+
+int recordingDeviceCount = 0;
 
 LTexture::~LTexture() { free(); }
 void LTexture::free() {
@@ -271,7 +280,7 @@ void Dot::move() {
     posY_ -= velY_;
   }
 }
-void Dot::render() { dotTexture.render(posX_, posY_); }
+void Dot::render() { promptTexture.render(posX_, posY_); }
 int Dot::getPosX() { return posX_; }
 int Dot::getPosY() { return posY_; }
 
@@ -308,15 +317,6 @@ bool init() {
           SDL_Log("Couldn't init ttf %s", TTF_GetError());
           success = false;
         }
-
-        spec.freq = MIX_DEFAULT_FREQUENCY;
-        spec.format = MIX_DEFAULT_FORMAT;
-        spec.channels = MIX_DEFAULT_CHANNELS;
-
-        if (Mix_OpenAudio(0, &spec) < 0) {
-          SDL_Log("Couldn't open audio %s", Mix_GetError());
-          success = false;
-        }
       }
     }
   }
@@ -325,24 +325,15 @@ bool init() {
 }
 
 void close() {
-  dotTexture.free();
-  bgTexture.free();
-
-  auto file = SDL_RWFromFile("assets/16_true_type_fonts/nums.bin", "w+b");
-  if (file) {
-    for (int i = 0; i < TOTAL_DATA; ++i) {
-      SDL_RWwrite(file, &data[i], sizeof(Sint32));
-    }
-    SDL_RWclose(file);
-  } else {
-    SDL_Log("Unable to save file %s", SDL_GetError());
-  }
+  promptTexture.free();
 
   Mix_CloseAudio();
 
   TTF_CloseFont(font);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
+  SDL_DestroyAudioStream(streamIn);
+  SDL_DestroyAudioStream(streamOut);
 
   Mix_Quit();
   TTF_Quit();
@@ -353,33 +344,29 @@ void close() {
 bool loadMedia() {
   bool success = true;
 
-  font = TTF_OpenFont("assets/16_true_type_fonts/lazy.ttf", 28);
+  font = TTF_OpenFont("assets/16_true_type_fonts/lazy.ttf", 15);
   if (font == NULL) {
     SDL_Log("%s", TTF_GetError());
     success = false;
-  }
-
-  auto file = SDL_RWFromFile("assets/16_true_type_fonts/nums.bin", "r+b");
-  if (file == NULL) {
-    SDL_Log("Could not open the file for reading %s", SDL_GetError());
-    file = SDL_RWFromFile("assets/16_true_type_fonts/nums.bin", "w+b");
-    if (file == NULL) {
-      SDL_Log("Could not create file %s", SDL_GetError());
-      success = false;
-    } else {
-      for (int i = 0; i < TOTAL_DATA; ++i) {
-        data[i] = 0;
-        SDL_RWwrite(file, &data[i], sizeof(Sint32));
-      }
-      SDL_RWclose(file);
-    }
   } else {
-    for (int i = 0; i < TOTAL_DATA; ++i) {
-      SDL_RWread(file, &data[i], sizeof(Sint32));
-    }
-    SDL_RWclose(file);
+    SDL_Color textColor{0, 0, 0, 255};
+    promptTexture.loadFromRenderedText("Press 1 to start record !!!",
+                                       textColor);
   }
 
+  streamIn = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_CAPTURE,
+                                       &inSpec, NULL, NULL);
+  if (!streamIn) {
+    SDL_Log("%s", SDL_GetError());
+    success = false;
+  }
+
+  streamOut = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_OUTPUT,
+                                        &inSpec, NULL, NULL);
+  if (!streamOut) {
+    SDL_Log("%s", SDL_GetError());
+    success = false;
+  }
   return success;
 }
 
@@ -416,69 +403,45 @@ void gameLoop() {
   bool quit = false;
 
   bool renderText = false;
+
+  auto currentState = RecordingState::STOPPED;
+
   SDL_Color textColor{0, 0, 0, 255};
-  SDL_Color highlightColor{255, 0, 0, 255};
-
-  dataTexture[0].loadFromRenderedText(std::to_string(data[0]), highlightColor);
-  for (int i = 1; i < TOTAL_DATA; ++i) {
-    dataTexture[i].loadFromRenderedText(std::to_string(data[i]), textColor);
-  }
-
-  int currentData = 0;
 
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
-      } else if (event.type == SDL_EVENT_KEY_DOWN) {
-        switch (event.key.keysym.sym) {
-          case SDLK_UP:
-            dataTexture[currentData].loadFromRenderedText(
-                std::to_string(data[currentData]), textColor);
-            --currentData;
-            if (currentData < 0) {
-              currentData = TOTAL_DATA - 1;
-            }
-            dataTexture[currentData].loadFromRenderedText(
+      }
 
-                std::to_string(data[currentData]), highlightColor);
-            break;
+      if (event.type == SDL_EVENT_KEY_DOWN && event.key.keysym.sym == SDLK_1) {
+        promptTexture.loadFromRenderedText("Recording...", textColor);
+        SDL_PauseAudioDevice(SDL_GetAudioStreamDevice(streamOut));
+        SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(streamIn));
+      } else if (event.type == SDL_EVENT_KEY_DOWN &&
+                 event.key.keysym.sym == SDLK_2) {
+        promptTexture.loadFromRenderedText("Playing...", textColor);
+        SDL_PauseAudioDevice(SDL_GetAudioStreamDevice(streamIn));
+        SDL_FlushAudioStream(streamIn);
+        SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(streamOut));
+      }
+    }
 
-          case SDLK_DOWN:
-            dataTexture[currentData].loadFromRenderedText(
-                std::to_string(data[currentData]), textColor);
-            ++currentData;
-            if (currentData > TOTAL_DATA - 1) {
-              currentData = 0;
-            }
-            dataTexture[currentData].loadFromRenderedText(
-
-                std::to_string(data[currentData]), highlightColor);
-            break;
-
-          case SDLK_LEFT:
-            --data[currentData];
-            dataTexture[currentData].loadFromRenderedText(
-                std::to_string(data[currentData]), textColor);
-            break;
-
-          case SDLK_RIGHT:
-            ++data[currentData];
-            dataTexture[currentData].loadFromRenderedText(
-                std::to_string(data[currentData]), textColor);
-            break;
-        }
+    // recording
+    while (SDL_GetAudioStreamAvailable(streamIn) > 0) {
+      Uint8 buf[1024];
+      const int br = SDL_GetAudioStreamData(streamIn, buf, sizeof(buf));
+      if (br < 0) {
+        SDL_Log("%s", SDL_GetError());
+      } else if (SDL_PutAudioStreamData(streamOut, buf, br) < 0) {
+        SDL_Log("%s", SDL_GetError());
       }
     }
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
-
-    for (int i = 0; i < TOTAL_DATA; ++i) {
-      dataTexture[i].render(0, 40 * i);
-    }
-
+    promptTexture.render(0, 0);
     SDL_RenderPresent(renderer);
 
     if (quit) {
