@@ -54,6 +54,8 @@ class LTexture {
   bool loadFromPixels();
   bool loadFromRenderedText(std::string textureText, SDL_Color textColor);
 
+  bool createBlank(int width, int height, SDL_TextureAccess access);
+  void setAsRenderTarget();
   int getWidth();
   int getHeight();
 
@@ -91,7 +93,7 @@ SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
 TTF_Font* font = NULL;
 
-LTexture fooTexture;
+LTexture targetTexture;
 LTexture dotTexture;
 
 LTexture::LTexture()
@@ -183,6 +185,20 @@ bool LTexture::loadFromRenderedText(std::string textureText,
   }
   return texture_ != NULL;
 }
+bool LTexture::createBlank(int width, int height, SDL_TextureAccess access) {
+  free();
+  texture_ = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, access,
+                               width, height);
+  if (texture_ == NULL) {
+    SDL_Log("Unable to create texture %s", SDL_GetError());
+  } else {
+    width_ = width;
+    height_ = height;
+  }
+  return texture_ != NULL;
+}
+void LTexture::setAsRenderTarget() { SDL_SetRenderTarget(renderer, texture_); }
+
 int LTexture::getWidth() { return width_; }
 int LTexture::getHeight() { return height_; }
 void LTexture::render(int x, int y, SDL_FRect* clip, double angle,
@@ -265,28 +281,10 @@ void close() {
 
 bool loadMedia() {
   bool success = true;
-  if (!fooTexture.loadPixelsFromFile(
-          "assets/40_texture_manipulation/foo.png")) {
+  if (!targetTexture.createBlank(SCREEN_WIDTH, SCREEN_HEIGHT,
+                                 SDL_TEXTUREACCESS_TARGET)) {
     success = false;
-  } else {
-    auto pixels = fooTexture.getPixels32();
-    int pixelCount = fooTexture.getPitch32() * fooTexture.getHeight();
-    auto format = SDL_CreatePixelFormat(SDL_GetWindowPixelFormat(window));
-
-    auto colorKey = SDL_MapRGBA(format, 0xFF, 0x00, 0xFF, 0xFF);
-    auto transparent = SDL_MapRGBA(format, 255, 255, 255, 0);
-
-    for (int i = 0; i < pixelCount; ++i) {
-      if (pixels[i] == colorKey) {
-        pixels[i] = transparent;
-      }
-    }
-
-    if (!fooTexture.loadFromPixels()) {
-      printf("Unable to load texture from surface\n");
-    }
   }
-
   return success;
 }
 
@@ -298,6 +296,8 @@ void gameLoop() {
   bool renderText = false;
 
   SDL_Color textColor{0, 0, 0, 255};
+  SDL_FPoint screenCenter{SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2};
+  double angle = 0;
 
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
@@ -307,9 +307,39 @@ void gameLoop() {
       }
     }
 
+    angle += 2;
+    if (angle > 360) {
+      angle -= 360;
+    }
+
+    targetTexture.setAsRenderTarget();
+
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
-    fooTexture.render(0, 0);
+
+    SDL_FRect fillRect = {SCREEN_WIDTH / 4, SCREEN_HEIGHT / 4, SCREEN_WIDTH / 2,
+                          SCREEN_HEIGHT / 2};
+    SDL_SetRenderDrawColor(renderer, 0xFF, 0x00, 0x00, 0xFF);
+    SDL_RenderFillRect(renderer, &fillRect);
+
+    SDL_FRect outlineRect = {SCREEN_WIDTH / 6, SCREEN_HEIGHT / 6,
+                             SCREEN_WIDTH * 2 / 3, SCREEN_HEIGHT * 2 / 3};
+    SDL_SetRenderDrawColor(renderer, 0x00, 0xFF, 0x00, 0xFF);
+    SDL_RenderRect(renderer, &outlineRect);
+
+    // Draw blue horizontal line
+    SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0xFF, 0xFF);
+    SDL_RenderLine(renderer, 0, SCREEN_HEIGHT / 2, SCREEN_WIDTH,
+                   SCREEN_HEIGHT / 2);
+
+    // Draw vertical line of yellow dots
+    SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0x00, 0xFF);
+    for (int i = 0; i < SCREEN_HEIGHT; i += 4) {
+      SDL_RenderPoint(renderer, SCREEN_WIDTH / 2, i);
+    }
+    SDL_SetRenderTarget(renderer, NULL);
+    targetTexture.render(0, 0, NULL, angle, &screenCenter);
+
     SDL_RenderPresent(renderer);
 
     if (quit) {
