@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -19,6 +20,7 @@
 #include "SDL_keyboard.h"
 #include "SDL_keycode.h"
 #include "SDL_log.h"
+#include "SDL_mouse.h"
 #include "SDL_pixels.h"
 #include "SDL_rect.h"
 #include "SDL_render.h"
@@ -27,20 +29,33 @@
 #include "SDL_stdinc.h"
 #include "SDL_timer.h"
 
-constexpr int TOTAL_PARTICLES = 20;
+// Screen dimension constants
+const int SCREEN_WIDTH = 640;
+const int SCREEN_HEIGHT = 480;
 
-struct Circle {
-  int x, y;
-  int r;
-};
+// The dimensions of the level
+const int LEVEL_WIDTH = 1280;
+const int LEVEL_HEIGHT = 960;
 
-bool init();
-void close();
-bool loadMedia();
-void gameLoop();
-bool checkCollision(Circle& a, Circle& b);
-bool checkCollision(Circle& a, SDL_FRect& b);
-double distanceSquared(int x1, int y1, int x2, int y2);
+// Tile constants
+const int TILE_WIDTH = 80;
+const int TILE_HEIGHT = 80;
+const int TOTAL_TILES = 192;
+const int TOTAL_TILE_SPRITES = 12;
+
+// The different tile sprites
+const int TILE_RED = 0;
+const int TILE_GREEN = 1;
+const int TILE_BLUE = 2;
+const int TILE_CENTER = 3;
+const int TILE_TOP = 4;
+const int TILE_TOPRIGHT = 5;
+const int TILE_RIGHT = 6;
+const int TILE_BOTTOMRIGHT = 7;
+const int TILE_BOTTOM = 8;
+const int TILE_BOTTOMLEFT = 9;
+const int TILE_LEFT = 10;
+const int TILE_TOPLEFT = 11;
 
 class LTexture {
  public:
@@ -66,37 +81,18 @@ class LTexture {
   int height_;
 };
 
-class LTimer {
+class Tile {
  public:
-  LTimer();
-
-  void start();
-  void stop();
-  void pause();
-  void unpause();
-  uint32_t getTicks();
-  bool isStarted();
-  bool isPaused();
+  Tile(int x, int y, int tileType);
+  void render(SDL_FRect& camera);
+  int getType();
+  SDL_FRect getBox();
 
  private:
-  uint32_t startTicks_;
-  uint32_t pausedTicks_;
-  bool paused_;
-  bool started_;
+  SDL_FRect box_;
+  int type_;
 };
 
-class Particle {
- public:
-  Particle(int x, int y);
-  void render();
-  bool isDead();
-
- private:
-  int x_;
-  int y_;
-  int frame_;
-  LTexture* texture_;
-};
 class Dot {
  public:
   static constexpr int DOT_WIDTH = 20;
@@ -104,35 +100,33 @@ class Dot {
   static constexpr int DOT_VEL = 10;
 
   Dot(int x = 0, int y = 0);
-  ~Dot();
   void handleEvent(SDL_Event& e);
-  void move();
-  void render();
-  int getPosX();
-  int getPosY();
+  void move(Tile* tiles[]);
+  void setCamera(SDL_FRect& camera);
+  void render(SDL_FRect& camera);
 
  private:
-  int posX_;
-  int posY_;
+  SDL_FRect box_;
   int velX_;
   int velY_;
-  Particle* particles_[TOTAL_PARTICLES];
-  void renderParticles();
 };
 
-constexpr int SCREEN_WIDTH = 640;
-constexpr int SCREEN_HEIGHT = 480;
+bool init();
+void close(Tile* tiles[]);
+bool loadMedia(Tile* tiles[]);
+void gameLoop(Tile* tiles[]);
+bool checkCollision(SDL_FRect a, SDL_FRect b);
+bool touchesWall(SDL_FRect box, Tile* tiles[]);
+bool setTiles(Tile* tiles[]);
 
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
 TTF_Font* font = NULL;
 
-LTexture promptTexture;
+SDL_FRect tileClips[TOTAL_TILE_SPRITES];
+LTexture tileTexture;
+
 LTexture dotTexture;
-LTexture redTexture;
-LTexture greenTexture;
-LTexture blueTexture;
-LTexture shimmerTexture;
 
 LTexture::~LTexture() { free(); }
 void LTexture::free() {
@@ -195,61 +189,18 @@ void LTexture::render(int x, int y, SDL_FRect* clip, double angle,
                            flip);
 }
 
-LTimer::LTimer()
-    : started_(false), paused_(false), startTicks_(0), pausedTicks_(0) {}
+Tile::Tile(int x, int y, int tileType)
+    : box_{float(x), float(y), TILE_WIDTH, TILE_HEIGHT}, type_(tileType) {}
+void Tile::render(SDL_FRect& camera) {
+  if (checkCollision(camera, box_)) {
+    tileTexture.render(box_.x - camera.x, box_.y - camera.y, &tileClips[type_]);
+  }
+}
+int Tile::getType() { return type_; }
+SDL_FRect Tile::getBox() { return box_; }
 
-void LTimer::start() {
-  started_ = true;
-  paused_ = false;
-
-  startTicks_ = SDL_GetTicks();
-  pausedTicks_ = 0;
-}
-void LTimer::stop() {
-  started_ = false;
-  paused_ = false;
-
-  startTicks_ = 0;
-  pausedTicks_ = 0;
-}
-void LTimer::pause() {
-  if (started_ && !paused_) {
-    paused_ = true;
-    pausedTicks_ = SDL_GetTicks() - startTicks_;
-    startTicks_ = 0;
-  }
-}
-void LTimer::unpause() {
-  if (started_ && paused_) {
-    paused_ = false;
-    startTicks_ = SDL_GetTicks() - pausedTicks_;
-    pausedTicks_ = 0;
-  }
-}
-uint32_t LTimer::getTicks() {
-  uint32_t time = 0;
-  if (started_) {
-    if (paused_) {
-      time = pausedTicks_;
-    } else {
-      time = SDL_GetTicks() - startTicks_;
-    }
-  }
-  return time;
-}
-bool LTimer::isStarted() { return started_; }
-bool LTimer::isPaused() { return paused_; }
-
-Dot::Dot(int x, int y) : posX_(x), posY_(y), velX_(0), velY_(0) {
-  for (int i = 0; i < TOTAL_PARTICLES; ++i) {
-    particles_[i] = new Particle(x, y);
-  }
-}
-Dot::~Dot() {
-  for (int i = 0; i < TOTAL_PARTICLES; ++i) {
-    delete particles_[i];
-  }
-}
+Dot::Dot(int x, int y)
+    : box_{0, 0, DOT_WIDTH, DOT_HEIGHT}, velX_(0), velY_(0) {}
 void Dot::handleEvent(SDL_Event& e) {
   if (e.type == SDL_EVENT_KEY_DOWN && e.key.repeat == 0) {
     switch (e.key.keysym.sym) {
@@ -283,59 +234,39 @@ void Dot::handleEvent(SDL_Event& e) {
     }
   }
 }
-void Dot::move() {
-  posX_ += velX_;
-  if (posX_ < 0 || posX_ + DOT_WIDTH > SCREEN_WIDTH) {
-    posX_ -= velX_;
+void Dot::move(Tile* tiles[]) {
+  box_.x += velX_;
+  if (box_.x < 0 || box_.x + DOT_WIDTH > LEVEL_WIDTH ||
+      touchesWall(box_, tiles)) {
+    box_.x -= velX_;
   }
 
-  posY_ += velY_;
-  if (posY_ < 0 || posY_ + DOT_HEIGHT > SCREEN_HEIGHT) {
-    posY_ -= velY_;
+  box_.y += velY_;
+  if (box_.y < 0 || box_.y + DOT_HEIGHT > SCREEN_HEIGHT ||
+      touchesWall(box_, tiles)) {
+    box_.y -= velY_;
   }
 }
-void Dot::render() {
-  dotTexture.render(posX_, posY_);
-  renderParticles();
-}
-void Dot::renderParticles() {
-  for (int i = 0; i < TOTAL_PARTICLES; ++i) {
-    if (particles_[i]->isDead()) {
-      delete particles_[i];
-      particles_[i] = new Particle(posX_, posY_);
-    }
-  }
-  for (int i = 0; i < TOTAL_PARTICLES; ++i) {
-    particles_[i]->render();
-  }
-}
-int Dot::getPosX() { return posX_; }
-int Dot::getPosY() { return posY_; }
+void Dot::setCamera(SDL_FRect& camera) {
+  camera.x = (box_.x + DOT_WIDTH / 2.0) - SCREEN_WIDTH / 2.0;
+  camera.y = (box_.y + DOT_HEIGHT / 2.0) - SCREEN_HEIGHT / 2.0;
 
-Particle::Particle(int x, int y) {
-  x_ = x - 5 + (rand() % 25);
-  y_ = y - 5 + (rand() % 25);
-  frame_ = rand() % 5;
-  switch (rand() % 3) {
-    case 0:
-      texture_ = &redTexture;
-      break;
-    case 1:
-      texture_ = &greenTexture;
-      break;
-    case 2:
-      texture_ = &blueTexture;
-      break;
+  if (camera.x < 0) {
+    camera.x = 0;
+  }
+  if (camera.y < 0) {
+    camera.y = 0;
+  }
+  if (camera.x > LEVEL_WIDTH - camera.w) {
+    camera.x = LEVEL_WIDTH - camera.w;
+  }
+  if (camera.y > LEVEL_HEIGHT - camera.h) {
+    camera.y = LEVEL_HEIGHT - camera.h;
   }
 }
-void Particle::render() {
-  texture_->render(x_, y_);
-  if (frame_ % 2 == 0) {
-    shimmerTexture.render(x_, y_);
-  }
-  ++frame_;
+void Dot::render(SDL_FRect& camera) {
+  dotTexture.render(box_.x - camera.x, box_.y - camera.y);
 }
-bool Particle::isDead() { return frame_ > 10; }
 
 bool init() {
   bool success = true;
@@ -378,8 +309,6 @@ bool init() {
 }
 
 void close() {
-  promptTexture.free();
-
   Mix_CloseAudio();
 
   TTF_CloseFont(font);
@@ -392,81 +321,187 @@ void close() {
   SDL_Quit();
 }
 
-bool loadMedia() {
+bool loadMedia(Tile* tiles[]) {
   bool success = true;
 
-  font = TTF_OpenFont("assets/16_true_type_fonts/lazy.ttf", 15);
-  if (font == NULL) {
-    SDL_Log("%s", TTF_GetError());
+  if (!dotTexture.loadFromFile("assets/39_tiling/dot.bmp")) {
+    printf("Failed to load dot file\n");
+    success = false;
+  }
+  if (!tileTexture.loadFromFile("assets/39_tiling/tiles.png")) {
+    printf("Failed to load tile file\n");
     success = false;
   }
 
-  if (!dotTexture.loadFromFile("assets/38_particle_engines/dot.bmp")) {
-    SDL_Log("Failed to load dot texture %s", SDL_GetError());
+  if (!setTiles(tiles)) {
+    printf("Failed to load tile set\n");
     success = false;
   }
-  if (!redTexture.loadFromFile("assets/38_particle_engines/red.bmp")) {
-    SDL_Log("Failed to load red texture %s", SDL_GetError());
-    success = false;
-  }
-  if (!greenTexture.loadFromFile("assets/38_particle_engines/green.bmp")) {
-    SDL_Log("Failed to load green texture %s", SDL_GetError());
-    success = false;
-  }
-  if (!blueTexture.loadFromFile("assets/38_particle_engines/blue.bmp")) {
-    SDL_Log("Failed to load blue texture %s", SDL_GetError());
-    success = false;
-  }
-  if (!shimmerTexture.loadFromFile("assets/38_particle_engines/shimmer.bmp")) {
-    SDL_Log("Failed to load shimmer texture %s", SDL_GetError());
-    success = false;
-  }
-
-  redTexture.setAlpha(192);
-  greenTexture.setAlpha(192);
-  blueTexture.setAlpha(192);
-  shimmerTexture.setAlpha(192);
 
   return success;
 }
 
-double distanceSquared(int x1, int y1, int x2, int y2) {
-  return (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2);
-}
-bool checkCollision(Circle& a, Circle& b) {
-  return distanceSquared(a.x, a.y, b.x, b.y) < (a.r + b.r) * (a.r + b.r);
-}
-bool checkCollision(Circle& a, SDL_FRect& b) {
-  int cX, cY;
-  if (a.x < b.x) {
-    cX = b.x;
-  } else if (a.x > b.x + b.w) {
-    cX = b.x + b.w;
-  } else {
-    cX = a.x;
+bool checkCollision(SDL_FRect a, SDL_FRect b) {
+  // The sides of the rectangles
+  int leftA, leftB;
+  int rightA, rightB;
+  int topA, topB;
+  int bottomA, bottomB;
+
+  // Calculate the sides of rect A
+  leftA = a.x;
+  rightA = a.x + a.w;
+  topA = a.y;
+  bottomA = a.y + a.h;
+
+  // Calculate the sides of rect B
+  leftB = b.x;
+  rightB = b.x + b.w;
+  topB = b.y;
+  bottomB = b.y + b.h;
+
+  // If any of the sides from A are outside of B
+  if (bottomA <= topB) {
+    return false;
   }
 
-  if (a.y < b.y) {
-    cY = b.y;
-  } else if (a.y > b.y + b.h) {
-    cY = b.y + b.h;
-  } else {
-    cY = a.y;
+  if (topA >= bottomB) {
+    return false;
   }
 
-  return distanceSquared(a.x, a.y, cX, cY) < a.r * a.r;
+  if (rightA <= leftB) {
+    return false;
+  }
+
+  if (leftA >= rightB) {
+    return false;
+  }
+
+  // If none of the sides from A are outside B
+  return true;
 }
 
-void gameLoop() {
+bool setTiles(Tile* tiles[]) {
+  bool tilesLoaded = true;
+  int x = 0;
+  int y = 0;
+
+  std::ifstream map("assets/39_tiling/lazy.map");
+  if (map.fail()) {
+    printf("Unable to load map file\n");
+    tilesLoaded = false;
+  } else {
+    for (int i = 0; i < TOTAL_TILES; ++i) {
+      int tileType = -1;
+      map >> tileType;
+      if (map.fail()) {
+        printf("Error loading map\n");
+        tilesLoaded = false;
+        break;
+      }
+
+      if (tileType >= 0 && tileType < TOTAL_TILE_SPRITES) {
+        tiles[i] = new Tile(x, y, tileType);
+      } else {
+        printf("Error loading map: invalid tile type\n");
+        tilesLoaded = false;
+        break;
+      }
+
+      x += TILE_WIDTH;
+      if (x >= LEVEL_WIDTH) {
+        x = 0;
+        y += TILE_HEIGHT;
+      }
+    }
+    if (tilesLoaded) {
+      tileClips[TILE_RED].x = 0;
+      tileClips[TILE_RED].y = 0;
+      tileClips[TILE_RED].w = TILE_WIDTH;
+      tileClips[TILE_RED].h = TILE_HEIGHT;
+
+      tileClips[TILE_GREEN].x = 0;
+      tileClips[TILE_GREEN].y = 80;
+      tileClips[TILE_GREEN].w = TILE_WIDTH;
+      tileClips[TILE_GREEN].h = TILE_HEIGHT;
+
+      tileClips[TILE_BLUE].x = 0;
+      tileClips[TILE_BLUE].y = 160;
+      tileClips[TILE_BLUE].w = TILE_WIDTH;
+      tileClips[TILE_BLUE].h = TILE_HEIGHT;
+
+      tileClips[TILE_TOPLEFT].x = 80;
+      tileClips[TILE_TOPLEFT].y = 0;
+      tileClips[TILE_TOPLEFT].w = TILE_WIDTH;
+      tileClips[TILE_TOPLEFT].h = TILE_HEIGHT;
+
+      tileClips[TILE_LEFT].x = 80;
+      tileClips[TILE_LEFT].y = 80;
+      tileClips[TILE_LEFT].w = TILE_WIDTH;
+      tileClips[TILE_LEFT].h = TILE_HEIGHT;
+
+      tileClips[TILE_BOTTOMLEFT].x = 80;
+      tileClips[TILE_BOTTOMLEFT].y = 160;
+      tileClips[TILE_BOTTOMLEFT].w = TILE_WIDTH;
+      tileClips[TILE_BOTTOMLEFT].h = TILE_HEIGHT;
+
+      tileClips[TILE_TOP].x = 160;
+      tileClips[TILE_TOP].y = 0;
+      tileClips[TILE_TOP].w = TILE_WIDTH;
+      tileClips[TILE_TOP].h = TILE_HEIGHT;
+
+      tileClips[TILE_CENTER].x = 160;
+      tileClips[TILE_CENTER].y = 80;
+      tileClips[TILE_CENTER].w = TILE_WIDTH;
+      tileClips[TILE_CENTER].h = TILE_HEIGHT;
+
+      tileClips[TILE_BOTTOM].x = 160;
+      tileClips[TILE_BOTTOM].y = 160;
+      tileClips[TILE_BOTTOM].w = TILE_WIDTH;
+      tileClips[TILE_BOTTOM].h = TILE_HEIGHT;
+
+      tileClips[TILE_TOPRIGHT].x = 240;
+      tileClips[TILE_TOPRIGHT].y = 0;
+      tileClips[TILE_TOPRIGHT].w = TILE_WIDTH;
+      tileClips[TILE_TOPRIGHT].h = TILE_HEIGHT;
+
+      tileClips[TILE_RIGHT].x = 240;
+      tileClips[TILE_RIGHT].y = 80;
+      tileClips[TILE_RIGHT].w = TILE_WIDTH;
+      tileClips[TILE_RIGHT].h = TILE_HEIGHT;
+
+      tileClips[TILE_BOTTOMRIGHT].x = 240;
+      tileClips[TILE_BOTTOMRIGHT].y = 160;
+      tileClips[TILE_BOTTOMRIGHT].w = TILE_WIDTH;
+      tileClips[TILE_BOTTOMRIGHT].h = TILE_HEIGHT;
+    }
+  }
+  map.close();
+  return tilesLoaded;
+}
+
+bool touchesWall(SDL_FRect box, Tile* tiles[]) {
+  for (int i = 0; i < TOTAL_TILES; ++i) {
+    if (tiles[i]->getType() >= TILE_CENTER &&
+        tiles[i]->getType() <= TILE_TOPLEFT) {
+      if (checkCollision(box, tiles[i]->getBox())) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void gameLoop(Tile* tiles[]) {
   SDL_Event event;
 
   bool quit = false;
 
   bool renderText = false;
 
-  Dot dot;
-
   SDL_Color textColor{0, 0, 0, 255};
+  Dot dot;
+  SDL_FRect camera = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
 
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
@@ -476,11 +511,15 @@ void gameLoop() {
       }
       dot.handleEvent(event);
     }
-    dot.move();
+    dot.move(tiles);
+    dot.setCamera(camera);
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
-    dot.render();
+    for (int i = 0; i < TOTAL_TILES; ++i) {
+      tiles[i]->render(camera);
+    }
+    dot.render(camera);
     SDL_RenderPresent(renderer);
 
     if (quit) {
@@ -491,8 +530,10 @@ void gameLoop() {
 
 int main(int argc, char* argv[]) {
   init();
-  if (loadMedia()) {
-    gameLoop();
+
+  Tile* tileSet[TOTAL_TILES];
+  if (loadMedia(tileSet)) {
+    gameLoop(tileSet);
   }
   close();
   return 0;
