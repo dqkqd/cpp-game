@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -18,7 +19,6 @@
 #include "SDL_keyboard.h"
 #include "SDL_keycode.h"
 #include "SDL_log.h"
-#include "SDL_oldnames.h"
 #include "SDL_pixels.h"
 #include "SDL_rect.h"
 #include "SDL_render.h"
@@ -26,7 +26,8 @@
 #include "SDL_scancode.h"
 #include "SDL_stdinc.h"
 #include "SDL_timer.h"
-#include "SDL_video.h"
+
+constexpr int TOTAL_PARTICLES = 20;
 
 struct Circle {
   int x, y;
@@ -40,11 +41,6 @@ void gameLoop();
 bool checkCollision(Circle& a, Circle& b);
 bool checkCollision(Circle& a, SDL_FRect& b);
 double distanceSquared(int x1, int y1, int x2, int y2);
-
-constexpr int MAX_RECORDING_DEVICES = 10;
-constexpr int MAX_RECORDING_SECONDS = 5;
-constexpr int RECORDING_BUFFER_SECONDS = MAX_RECORDING_SECONDS + 1;
-enum class RecordingState { STOPPED, RECORDING, PLAYBACK };
 
 class LTexture {
  public:
@@ -89,6 +85,18 @@ class LTimer {
   bool started_;
 };
 
+class Particle {
+ public:
+  Particle(int x, int y);
+  void render();
+  bool isDead();
+
+ private:
+  int x_;
+  int y_;
+  int frame_;
+  LTexture* texture_;
+};
 class Dot {
  public:
   static constexpr int DOT_WIDTH = 20;
@@ -96,6 +104,7 @@ class Dot {
   static constexpr int DOT_VEL = 10;
 
   Dot(int x = 0, int y = 0);
+  ~Dot();
   void handleEvent(SDL_Event& e);
   void move();
   void render();
@@ -107,62 +116,23 @@ class Dot {
   int posY_;
   int velX_;
   int velY_;
+  Particle* particles_[TOTAL_PARTICLES];
+  void renderParticles();
 };
 
-class LWindow {
- public:
-  LWindow();
-  bool init();
-  SDL_Renderer* createRenderer();
-  void handleEvent(SDL_Event& e);
-
-  void focus();
-  void render();
-  void free();
-
-  int getWidth();
-  int getHeight();
-
-  bool hasMouseFocus();
-  bool hasKeyboardFocus();
-  bool isMinimized();
-  bool isShown();
-
- private:
-  SDL_Window* window_;
-  SDL_Renderer* renderer_;
-  int windowId_;
-  int windowDisplayId_;
-
-  int width_;
-  int height_;
-
-  bool mouseFocus_;
-  bool keyboardFocus_;
-  bool fullScreen_;
-  bool minimized_;
-  bool shown_;
-};
-
-constexpr int LEVEL_WIDTH = 1280;
-constexpr int LEVEL_HEIGHT = 960;
 constexpr int SCREEN_WIDTH = 640;
 constexpr int SCREEN_HEIGHT = 480;
-constexpr int TOTAL_DATA = 100;
-constexpr int SCREEN_FPS = 60;
-constexpr int SCREEN_TICKS_PER_FRAME = 1000 / SCREEN_FPS;
 
-LWindow window;
-int totalDisplays;
-SDL_DisplayID* displays;
-SDL_Rect* displayBounds = NULL;
-
-SDL_Renderer* renderer;
-LTexture screenTexture;
-
+SDL_Window* window = NULL;
+SDL_Renderer* renderer = NULL;
 TTF_Font* font = NULL;
 
 LTexture promptTexture;
+LTexture dotTexture;
+LTexture redTexture;
+LTexture greenTexture;
+LTexture blueTexture;
+LTexture shimmerTexture;
 
 LTexture::~LTexture() { free(); }
 void LTexture::free() {
@@ -270,7 +240,16 @@ uint32_t LTimer::getTicks() {
 bool LTimer::isStarted() { return started_; }
 bool LTimer::isPaused() { return paused_; }
 
-Dot::Dot(int x, int y) : posX_(x), posY_(y), velX_(0), velY_(0) {}
+Dot::Dot(int x, int y) : posX_(x), posY_(y), velX_(0), velY_(0) {
+  for (int i = 0; i < TOTAL_PARTICLES; ++i) {
+    particles_[i] = new Particle(x, y);
+  }
+}
+Dot::~Dot() {
+  for (int i = 0; i < TOTAL_PARTICLES; ++i) {
+    delete particles_[i];
+  }
+}
 void Dot::handleEvent(SDL_Event& e) {
   if (e.type == SDL_EVENT_KEY_DOWN && e.key.repeat == 0) {
     switch (e.key.keysym.sym) {
@@ -315,150 +294,48 @@ void Dot::move() {
     posY_ -= velY_;
   }
 }
-void Dot::render() { promptTexture.render(posX_, posY_); }
+void Dot::render() {
+  dotTexture.render(posX_, posY_);
+  renderParticles();
+}
+void Dot::renderParticles() {
+  for (int i = 0; i < TOTAL_PARTICLES; ++i) {
+    if (particles_[i]->isDead()) {
+      delete particles_[i];
+      particles_[i] = new Particle(posX_, posY_);
+    }
+  }
+  for (int i = 0; i < TOTAL_PARTICLES; ++i) {
+    particles_[i]->render();
+  }
+}
 int Dot::getPosX() { return posX_; }
 int Dot::getPosY() { return posY_; }
 
-LWindow::LWindow()
-    : window_(NULL),
-      mouseFocus_(false),
-      keyboardFocus_(false),
-      fullScreen_(false),
-      minimized_(false),
-      width_(0),
-      height_(0) {}
-
-bool LWindow::init() {
-  window_ = SDL_CreateWindow("Hello SDL", SCREEN_WIDTH, SCREEN_HEIGHT,
-                             SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-  if (window_) {
-    mouseFocus_ = true;
-    keyboardFocus_ = true;
-    width_ = SCREEN_WIDTH;
-    height_ = SCREEN_HEIGHT;
-
-    windowId_ = SDL_GetWindowID(window_);
-    windowDisplayId_ = SDL_GetDisplayForWindow(window_);
-    shown_ = true;
-
-    renderer_ = SDL_CreateRenderer(
-        window_, NULL, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (renderer_) {
-      SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
-    }
-  }
-  return window_ != NULL && renderer_ != NULL;
-}
-
-void LWindow::handleEvent(SDL_Event& e) {
-  if (e.type >= SDL_EVENT_WINDOW_FIRST && e.type <= SDL_EVENT_WINDOW_LAST &&
-      e.window.windowID == windowId_) {
-    bool updateCaption = false;
-    switch (e.window.type) {
-      case SDL_EVENT_WINDOW_MOVED:
-        windowDisplayId_ = SDL_GetDisplayForWindow(window_);
-        updateCaption = true;
-        break;
-      case SDL_EVENT_WINDOW_SHOWN:
-        shown_ = true;
-        break;
-      case SDL_EVENT_WINDOW_HIDDEN:
-        shown_ = false;
-        break;
-      case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-        SDL_HideWindow(window_);
-        break;
-      case SDL_EVENT_WINDOW_RESIZED:
-        width_ = e.window.data1;
-        height_ = e.window.data2;
-        SDL_RenderPresent(renderer);
-        break;
-      case SDL_EVENT_WINDOW_EXPOSED:
-        SDL_RenderPresent(renderer);
-        break;
-      case SDL_EVENT_WINDOW_MOUSE_ENTER:
-        mouseFocus_ = true;
-        updateCaption = true;
-        break;
-      case SDL_EVENT_WINDOW_MOUSE_LEAVE:
-        mouseFocus_ = false;
-        updateCaption = true;
-        break;
-      case SDL_EVENT_WINDOW_FOCUS_GAINED:
-        keyboardFocus_ = true;
-        updateCaption = true;
-        break;
-      case SDL_EVENT_WINDOW_FOCUS_LOST:
-        keyboardFocus_ = false;
-        updateCaption = true;
-        break;
-      case SDL_EVENT_WINDOW_MINIMIZED:
-        minimized_ = true;
-        break;
-      case SDL_EVENT_WINDOW_MAXIMIZED:
-        minimized_ = false;
-        break;
-      case SDL_EVENT_WINDOW_RESTORED:
-        minimized_ = false;
-        break;
-    }
-    if (updateCaption) {
-      std::stringstream caption;
-      caption << "Hello SDL - MouseFocus:" << ((mouseFocus_) ? "On" : "Off")
-              << " KeyboardFocus:" << ((keyboardFocus_) ? "On" : "Off");
-      SDL_SetWindowTitle(window_, caption.str().c_str());
-    }
-  } else if ((e.type = SDL_EVENT_KEY_DOWN)) {
-    bool switchDisplay = false;
-    switch (e.key.keysym.sym) {
-      case SDLK_UP:
-        ++windowDisplayId_;
-        switchDisplay = true;
-        break;
-      case SDLK_DOWN:
-        --windowDisplayId_;
-        switchDisplay = true;
-        break;
-    }
-    if (switchDisplay) {
-      if (windowDisplayId_ < 1) {
-        printf("-\n");
-        windowDisplayId_ = totalDisplays;
-      } else if (windowDisplayId_ >= totalDisplays + 1) {
-        printf("+\n");
-        windowDisplayId_ = 1;
-      }
-
-      windowDisplayId_ = 1;
-      printf("Switch %d\n", windowDisplayId_);
-      for (int i = 0; i < totalDisplays; ++i) {
-        printf("%d %d %d %d\n", displayBounds[i].x, displayBounds[i].y,
-               displayBounds[i].w, displayBounds[i].h);
-      }
-      SDL_SetWindowPosition(window_, 0, 0);
-    }
+Particle::Particle(int x, int y) {
+  x_ = x - 5 + (rand() % 25);
+  y_ = y - 5 + (rand() % 25);
+  frame_ = rand() % 5;
+  switch (rand() % 3) {
+    case 0:
+      texture_ = &redTexture;
+      break;
+    case 1:
+      texture_ = &greenTexture;
+      break;
+    case 2:
+      texture_ = &blueTexture;
+      break;
   }
 }
-void LWindow::focus() {
-  if (!shown_) {
-    SDL_ShowWindow(window_);
+void Particle::render() {
+  texture_->render(x_, y_);
+  if (frame_ % 2 == 0) {
+    shimmerTexture.render(x_, y_);
   }
-  SDL_RaiseWindow(window_);
+  ++frame_;
 }
-void LWindow::render() {
-  if (!minimized_) {
-    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
-    SDL_RenderClear(renderer_);
-    SDL_RenderPresent(renderer_);
-  }
-}
-int LWindow::getWidth() { return width_; }
-int LWindow::getHeight() { return height_; }
-bool LWindow::hasMouseFocus() { return mouseFocus_; }
-bool LWindow::hasKeyboardFocus() { return keyboardFocus_; }
-bool LWindow::isMinimized() { return minimized_; }
-bool LWindow::isShown() { return shown_; }
-void LWindow::free() { SDL_DestroyWindow(window_); }
+bool Particle::isDead() { return frame_ > 10; }
 
 bool init() {
   bool success = true;
@@ -467,23 +344,32 @@ bool init() {
     SDL_Log("SDL_Init failed (%s)", SDL_GetError());
     success = false;
   } else {
-    if (!window.init()) {
-      SDL_Log("Could not init window %s", SDL_GetError());
+    window = SDL_CreateWindow("Hello SDL", SCREEN_WIDTH, SCREEN_HEIGHT,
+                              SDL_WINDOW_OPENGL);
+    if (!window) {
+      SDL_Log("%s", SDL_GetError());
       success = false;
     } else {
       if (!SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1")) {
         printf("Warning: Linear texture filtering not enabled!");
       }
 
-      displays = SDL_GetDisplays(&totalDisplays);
-      if (totalDisplays < 2) {
-        printf("Only one displays connected\n");
+      renderer = SDL_CreateRenderer(
+          window, NULL, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+      if (!renderer) {
+        SDL_Log("%s", SDL_GetError());
         success = false;
-      }
+      } else {
+        int imgFlags = IMG_INIT_PNG;
+        if (!(IMG_Init(imgFlags) & imgFlags)) {
+          SDL_Log("%s ", IMG_GetError());
+          success = false;
+        }
 
-      displayBounds = new SDL_Rect[totalDisplays];
-      for (int i = 0; i < totalDisplays; ++i) {
-        SDL_GetDisplayBounds(displays[i], &displayBounds[i]);
+        if (TTF_Init() < 0) {
+          SDL_Log("Couldn't init ttf %s", TTF_GetError());
+          success = false;
+        }
       }
     }
   }
@@ -498,8 +384,7 @@ void close() {
 
   TTF_CloseFont(font);
   SDL_DestroyRenderer(renderer);
-
-  window.free();
+  SDL_DestroyWindow(window);
 
   Mix_Quit();
   TTF_Quit();
@@ -509,6 +394,39 @@ void close() {
 
 bool loadMedia() {
   bool success = true;
+
+  font = TTF_OpenFont("assets/16_true_type_fonts/lazy.ttf", 15);
+  if (font == NULL) {
+    SDL_Log("%s", TTF_GetError());
+    success = false;
+  }
+
+  if (!dotTexture.loadFromFile("assets/38_particle_engines/dot.bmp")) {
+    SDL_Log("Failed to load dot texture %s", SDL_GetError());
+    success = false;
+  }
+  if (!redTexture.loadFromFile("assets/38_particle_engines/red.bmp")) {
+    SDL_Log("Failed to load red texture %s", SDL_GetError());
+    success = false;
+  }
+  if (!greenTexture.loadFromFile("assets/38_particle_engines/green.bmp")) {
+    SDL_Log("Failed to load green texture %s", SDL_GetError());
+    success = false;
+  }
+  if (!blueTexture.loadFromFile("assets/38_particle_engines/blue.bmp")) {
+    SDL_Log("Failed to load blue texture %s", SDL_GetError());
+    success = false;
+  }
+  if (!shimmerTexture.loadFromFile("assets/38_particle_engines/shimmer.bmp")) {
+    SDL_Log("Failed to load shimmer texture %s", SDL_GetError());
+    success = false;
+  }
+
+  redTexture.setAlpha(192);
+  greenTexture.setAlpha(192);
+  blueTexture.setAlpha(192);
+  shimmerTexture.setAlpha(192);
+
   return success;
 }
 
@@ -544,16 +462,26 @@ void gameLoop() {
 
   bool quit = false;
 
+  bool renderText = false;
+
+  Dot dot;
+
+  SDL_Color textColor{0, 0, 0, 255};
+
   while (!quit) {
     while (SDL_PollEvent(&event) != 0) {
       if (event.type == SDL_EVENT_QUIT) {
         quit = true;
         break;
       }
-      window.handleEvent(event);
+      dot.handleEvent(event);
     }
+    dot.move();
 
-    window.render();
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderClear(renderer);
+    dot.render();
+    SDL_RenderPresent(renderer);
 
     if (quit) {
       break;
